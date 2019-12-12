@@ -90,50 +90,50 @@ namespace Sketchfab
 		//UI
 		void OnGUI()
 		{
-			checkValidity();
-			if (_ui == null || !_ui._isInitialized)
+			//checkValidity();
+			//if (_ui == null || !_ui._isInitialized)
+			//{
+			//	GUILayout.Label("Initializing ui...");
+			//	return;
+			//}
+
+			//SketchfabPlugin.displayHeader();
+
+			//GUILayout.Space(SketchfabPlugin.SPACE_SIZE);
+
+			//showModelProperties();
+
+			//GUILayout.Space(SketchfabPlugin.SPACE_SIZE);
+			//showOptions();
+
+			//bool enable = updateExporterStatus();
+			//if (enable)
+			//	GUI.color = SketchfabUI.SKFB_BLUE;
+			//else
+			//	GUI.color = Color.white;
+
+			//GUI.enabled = enable;
+			//GUILayout.BeginHorizontal();
+			//GUILayout.FlexibleSpace();
+
+			if (GUILayout.Button("EXPORT SELECTION", GUILayout.Height(40)))
 			{
-				GUILayout.Label("Initializing ui...");
-				return;
+				//if (!enable)
+				//{
+				//	EditorUtility.DisplayDialog("Error", status, "Ok");
+				//}
+				//else
+				//{
+				proceedToExportAndUpload();
+				//}
 			}
 
-			SketchfabPlugin.displayHeader();
+			//GUILayout.FlexibleSpace();
+			//GUILayout.EndHorizontal();
 
-			GUILayout.Space(SketchfabPlugin.SPACE_SIZE);
+			//GUI.color = Color.white;
 
-			showModelProperties();
-
-			GUILayout.Space(SketchfabPlugin.SPACE_SIZE);
-			showOptions();
-
-			bool enable = updateExporterStatus();
-			if (enable)
-				GUI.color = SketchfabUI.SKFB_BLUE;
-			else
-				GUI.color = Color.white;
-
-			GUI.enabled = enable;
-			GUILayout.BeginHorizontal();
-			GUILayout.FlexibleSpace();
-
-			if (GUILayout.Button(status, GUILayout.Width(250), GUILayout.Height(40)))
-			{
-				if (!enable)
-				{
-					EditorUtility.DisplayDialog("Error", status, "Ok");
-				}
-				else
-				{
-					proceedToExportAndUpload();
-				}
-			}
-
-			GUILayout.FlexibleSpace();
-			GUILayout.EndHorizontal();
-
-			GUI.color = Color.white;
-
-			SketchfabPlugin.displayFooter();
+			//SketchfabPlugin.displayFooter();
 		}
 
 		private bool updateExporterStatus()
@@ -310,21 +310,23 @@ namespace Sketchfab
 			exporter.SaveGLTFandBin(Path.GetDirectoryName(exportPath), Path.GetFileNameWithoutExtension(exportPath));
 
 			GLTFUtils.buildZip(exporter.getExportedFilesList(), Path.Combine(Path.GetDirectoryName(exportPath), "Unity2Skfb.zip"), true);
-			if (File.Exists(zipPath))
-			{
-				bool shouldUpload = checkFileSize(zipPath);
+			Debug.Log("ZIP file at: " + zipPath);
 
-				if (!shouldUpload)
-				{
-					shouldUpload = EditorUtility.DisplayDialog("Error", "The export exceed the max file size allowed by your current account type", "Continue", "Cancel");
-				}
+			//if (File.Exists(zipPath))
+			//{
+			//	bool shouldUpload = checkFileSize(zipPath);
 
-				publishModel(zipPath);
-			}
-			else
-			{
-				Debug.Log("Zip file has not been generated. Aborting publish.");
-			}
+			//	if (!shouldUpload)
+			//	{
+			//		shouldUpload = EditorUtility.DisplayDialog("Error", "The export exceed the max file size allowed by your current account type", "Continue", "Cancel");
+			//	}
+
+			//	publishModel(zipPath);
+			//}
+			//else
+			//{
+			//	Debug.Log("Zip file has not been generated. Aborting publish.");
+			//}
 		}
 
 		private bool checkFileSize(string zipPath)
