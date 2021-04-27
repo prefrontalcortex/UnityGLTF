@@ -1,4 +1,4 @@
-﻿#if UNITY_EDITOR
+#if UNITY_EDITOR
 #define ANIMATION_EXPORT_SUPPORTED
 #endif
 
@@ -183,6 +183,12 @@ namespace UnityGLTF
 			set { settings.SaveFolderPath = value; }
 		}
 #endif
+
+		public delegate bool OnExportNode(Transform transform, Node node);
+		public delegate bool OnExportScene(string name, GLTFScene scene, Transform[] rootObjTransforms);
+
+		public OnExportScene onExportScene;
+		public OnExportNode onExportNode;
 
 		private static int AnimationBakingFramerate = 30; // FPS
 		private static bool BakeAnimationData = true;
@@ -700,6 +706,10 @@ namespace UnityGLTF
 
 			_root.Scenes.Add(scene);
 
+			if (onExportScene != null) {
+				onExportScene(name, scene, rootObjTransforms);
+			}
+
 			return new SceneId
 			{
 				Id = _root.Scenes.Count - 1,
@@ -759,6 +769,11 @@ namespace UnityGLTF
 
 			// Register nodes for animation parsing (could be disabled is animation is disables)
 			_exportedTransforms.Add(nodeTransform.GetInstanceID(), _root.Nodes.Count);
+
+			if (onExportNode != null)
+			{
+				onExportNode(nodeTransform, node);
+			}
 
 			_root.Nodes.Add(node);
 
