@@ -1,4 +1,4 @@
-#if UNITY_EDITOR
+﻿#if UNITY_EDITOR
 #define ANIMATION_EXPORT_SUPPORTED
 #endif
 
@@ -1285,7 +1285,7 @@ namespace UnityGLTF
             return false;
         }
 
-        private MaterialId ExportMaterial(Material materialObj)
+        public MaterialId ExportMaterial(Material materialObj)
 		{
             //TODO if material is null
 			MaterialId id = GetMaterialId(_root, materialObj);
