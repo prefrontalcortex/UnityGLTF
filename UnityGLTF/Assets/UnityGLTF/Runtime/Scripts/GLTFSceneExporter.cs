@@ -706,9 +706,7 @@ namespace UnityGLTF
 
 			_root.Scenes.Add(scene);
 
-			if (onExportScene != null) {
-				onExportScene(name, scene, rootObjTransforms);
-			}
+			onExportScene?.Invoke(name, scene, rootObjTransforms);
 
 			return new SceneId
 			{
@@ -770,10 +768,7 @@ namespace UnityGLTF
 			// Register nodes for animation parsing (could be disabled is animation is disables)
 			_exportedTransforms.Add(nodeTransform.GetInstanceID(), _root.Nodes.Count);
 
-			if (onExportNode != null)
-			{
-				onExportNode(nodeTransform, node);
-			}
+			onExportNode?.Invoke(nodeTransform, node);
 
 			_root.Nodes.Add(node);
 
