@@ -184,8 +184,8 @@ namespace UnityGLTF
 		}
 #endif
 
-		public delegate bool OnExportNode(Transform transform, Node node);
-		public delegate bool OnExportScene(string name, GLTFScene scene, Transform[] rootObjTransforms);
+		public delegate void OnExportNode(Transform transform, Node node);
+		public delegate void OnExportScene(string name, GLTFScene scene, Transform[] rootObjTransforms);
 
 		public OnExportScene onExportScene;
 		public OnExportNode onExportNode;
