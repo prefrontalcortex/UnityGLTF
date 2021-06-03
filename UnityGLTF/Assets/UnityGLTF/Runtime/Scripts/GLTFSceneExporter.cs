@@ -194,6 +194,12 @@ namespace UnityGLTF
 		}
 #endif
 
+		public delegate void OnExportNode(Transform transform, Node node);
+		public delegate void OnExportScene(string name, GLTFScene scene, Transform[] rootObjTransforms);
+
+		public OnExportScene onExportScene;
+		public OnExportNode onExportNode;
+
 		private static int AnimationBakingFramerate = 30; // FPS
 		private static bool BakeAnimationData = true;
 
@@ -710,6 +716,8 @@ namespace UnityGLTF
 
 			_root.Scenes.Add(scene);
 
+			onExportScene?.Invoke(name, scene, rootObjTransforms);
+
 			return new SceneId
 			{
 				Id = _root.Scenes.Count - 1,
@@ -769,6 +777,8 @@ namespace UnityGLTF
 
 			// Register nodes for animation parsing (could be disabled is animation is disables)
 			_exportedTransforms.Add(nodeTransform.GetInstanceID(), _root.Nodes.Count);
+
+			onExportNode?.Invoke(nodeTransform, node);
 
 			_root.Nodes.Add(node);
 
@@ -1280,7 +1290,7 @@ namespace UnityGLTF
             return false;
         }
 
-        private MaterialId ExportMaterial(Material materialObj)
+        public MaterialId ExportMaterial(Material materialObj)
 		{
             //TODO if material is null
 			MaterialId id = GetMaterialId(_root, materialObj);
