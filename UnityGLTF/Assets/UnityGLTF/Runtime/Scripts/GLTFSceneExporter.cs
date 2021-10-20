@@ -82,6 +82,8 @@ namespace UnityGLTF
 		private List<Transform> _animatedNodes;
 		private List<Transform> _skinnedNodes;
 		private Dictionary<SkinnedMeshRenderer, UnityEngine.Mesh> _bakedMeshes;
+		private Dictionary<int, string> _textureHashes = new Dictionary<int, string>();
+		private Dictionary<int, string> _textureNames = new Dictionary<int, string>();
 
 		private int _exportLayerMask;
 		private ExportOptions _exportOptions;
@@ -197,7 +199,6 @@ namespace UnityGLTF
 
 		private static int AnimationBakingFramerate = 30; // FPS
 		private static bool BakeAnimationData = true;
-		private Dictionary<Hash128, string> _textureNames = new Dictionary<Hash128, string>();
 
 		/// <summary>
 		/// Create a GLTFExporter that exports out a transform
@@ -255,7 +256,8 @@ namespace UnityGLTF
 			_imageInfos = new List<ImageInfo>();
 			_materials = new List<Material>();
 			_textures = new List<Texture>();
-			_textureNames = new Dictionary<Hash128, string>();
+			_textureHashes = new Dictionary<int, string>();
+			_textureNames = new Dictionary<int, string>();
 
 			_buffer = new GLTFBuffer();
 			_bufferId = new BufferId
@@ -2031,10 +2033,10 @@ namespace UnityGLTF
 				textureObj.name = (_root.Textures.Count + 1).ToString();
 			}
 
-			var textureName = GetUniqueTextureName(textureObj);
+			SetUniqueTextureName(textureObj);
 			if (ExportNames)
 			{
-				texture.Name = textureName;
+				texture.Name = textureObj.name;
 			}
 
 			if (_shouldUseInternalBufferForImages)
@@ -2100,16 +2102,15 @@ namespace UnityGLTF
 			}
 
 			var image = new GLTFImage();
-			var textureName = GetUniqueTextureName(texture);
+			SetUniqueTextureName(texture);
 			if (ExportNames)
 			{
-				image.Name = textureName;
+				image.Name = texture.name;
 			}
 
             if (texture.GetType() == typeof(RenderTexture))
             {
                 Texture2D tempTexture = new Texture2D(texture.width, texture.height);
-                tempTexture.name = textureName;
 
                 RenderTexture.active = texture as RenderTexture;
                 tempTexture.ReadPixels(new Rect(0, 0, texture.width, texture.height), 0, 0);
@@ -2120,12 +2121,11 @@ namespace UnityGLTF
             if (texture.GetType() == typeof(CustomRenderTexture))
             {
                 Texture2D tempTexture = new Texture2D(texture.width, texture.height);
-                tempTexture.name = textureName;
 
                 RenderTexture.active = texture as CustomRenderTexture;
                 tempTexture.ReadPixels(new Rect(0, 0, texture.width, texture.height), 0, 0);
                 tempTexture.Apply();
-                texture = tempTexture;
+				texture = tempTexture;
             }
 #endif
 
@@ -2153,28 +2153,51 @@ namespace UnityGLTF
 		private string GetTextureName(Texture texture)
 		{
 			var name = texture.name;
-			//name = EnsureValidFileName(name);
 			name = name.Replace('.', '_');
-			var success = _textureNames.TryGetValue(texture.imageContentsHash, out name);
 			return name;
 		}
 
-		private string GetUniqueTextureName(Texture texture)
+		private void SetUniqueTextureName(Texture texture)
 		{
 			var name = texture.name;
-			var textureHash = texture.imageContentsHash;
-			//name = EnsureValidFileName(name);
+			var textureHash = texture.GetInstanceID();
+			if (texture is Texture2D tex2D)
+				textureHash = CreateHashValue(tex2D);
 			name = name.Replace('.', '_');
 			var uniqueName = name;
 			var number = 0;
-			var isUniqueTexture = _textures.All(x => x.imageContentsHash != textureHash);
-			while (isUniqueTexture && _textureNames.ContainsValue(uniqueName) && number++ < 1000)
+			var isUniqueTexture = !_textureHashes.ContainsKey(textureHash);
+			while (isUniqueTexture && _textureHashes.ContainsValue(uniqueName) && number++ < 1000)
 				uniqueName = name + number.ToString();
 
-			if (!_textureNames.ContainsKey(textureHash))
-				_textureNames.Add(textureHash, uniqueName);
+			if (isUniqueTexture)
+				_textureHashes.Add(textureHash, uniqueName);
 
-			return uniqueName;
+			texture.name = uniqueName;
+		}
+
+		/// <summary>
+		/// Creates a hashcode from a number of samples of a texture
+		/// </summary>
+		/// <param name="tex"></param>
+		/// <returns></returns>
+		private int CreateHashValue(Texture2D tex)
+		{
+			var hash = CombineHashCodes(tex.width, tex.height);
+			var pixels = tex.GetPixels32();
+			var numberOfSamples = 10;
+			var pixelStep = pixels.Length / numberOfSamples;
+			for (int i = 0; i < numberOfSamples; i++)
+			{
+				var c = pixels[pixelStep * i];
+				hash += CombineHashCodes(c.r + c.g, c.b + c.a);
+			}
+			return hash;
+		}
+
+		internal static int CombineHashCodes(int h1, int h2)
+		{
+			return ((h1 << 5) + h1) ^ h2;
 		}
 
 		bool TryGetTextureDataFromDisk(TextureMapType textureMapType, Texture texture, out string path, out byte[] data)
