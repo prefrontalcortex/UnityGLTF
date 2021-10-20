@@ -648,15 +648,16 @@ namespace UnityGLTF
 		private string ConstructImageFilenamePath(Texture2D texture, string outputPath, string enforceExtension = null)
 		{
 			var imagePath = _exportOptions.TexturePathRetriever(texture);
+			var textureName = GetTextureName(texture);
 			if (string.IsNullOrEmpty(imagePath))
 			{
-				imagePath = Path.Combine(outputPath, texture.name);
+				imagePath = Path.Combine(outputPath, textureName);
 			}
 
 			var filenamePath = Path.Combine(outputPath, imagePath);
 			if (!ExportFullPath)
 			{
-				filenamePath = outputPath + "/" + texture.name;
+				filenamePath = outputPath + "/" + textureName;
 			}
 			var file = new FileInfo(filenamePath);
 			file.Directory.Create();
@@ -2024,9 +2025,10 @@ namespace UnityGLTF
 				textureObj.name = (_root.Textures.Count + 1).ToString();
 			}
 
+			var textureName = GetTextureName(textureObj);
 			if (ExportNames)
 			{
-				texture.Name = textureObj.name;
+				texture.Name = textureName;
 			}
 
 			if (_shouldUseInternalBufferForImages)
@@ -2055,9 +2057,10 @@ namespace UnityGLTF
 		private string GetImageOutputPath(Texture texture)
 		{
 			var imagePath = _exportOptions.TexturePathRetriever(texture);
+			var textureName = GetTextureName(texture);
 			if (string.IsNullOrEmpty(imagePath))
 			{
-				imagePath = texture.name;
+				imagePath = textureName;
 			}
 
 			var filenamePath = imagePath;
@@ -2075,7 +2078,7 @@ namespace UnityGLTF
 				filenamePath = Path.GetFileName(filenamePath);
 				if (!isGltfCompatible)
 				{
-					filenamePath = Path.ChangeExtension(texture.name, ".png");
+					filenamePath = Path.ChangeExtension(textureName, ".png");
 				}
 			}
 
@@ -2091,16 +2094,16 @@ namespace UnityGLTF
 			}
 
 			var image = new GLTFImage();
-
+			var textureName = GetTextureName(texture);
 			if (ExportNames)
 			{
-				image.Name = texture.name;
+				image.Name = textureName;
 			}
 
             if (texture.GetType() == typeof(RenderTexture))
             {
                 Texture2D tempTexture = new Texture2D(texture.width, texture.height);
-                tempTexture.name = texture.name;
+                tempTexture.name = textureName;
 
                 RenderTexture.active = texture as RenderTexture;
                 tempTexture.ReadPixels(new Rect(0, 0, texture.width, texture.height), 0, 0);
@@ -2111,7 +2114,7 @@ namespace UnityGLTF
             if (texture.GetType() == typeof(CustomRenderTexture))
             {
                 Texture2D tempTexture = new Texture2D(texture.width, texture.height);
-                tempTexture.name = texture.name;
+                tempTexture.name = textureName;
 
                 RenderTexture.active = texture as CustomRenderTexture;
                 tempTexture.ReadPixels(new Rect(0, 0, texture.width, texture.height), 0, 0);
@@ -2139,6 +2142,14 @@ namespace UnityGLTF
 			_root.Images.Add(image);
 
 			return id;
+		}
+
+		private string GetTextureName(Texture texture)
+		{
+			var name = texture.name;
+			//name = EnsureValidFileName(name);
+			name = name.Replace('.', '_');
+			return name;
 		}
 
 		bool TryGetTextureDataFromDisk(TextureMapType textureMapType, Texture texture, out string path, out byte[] data)
