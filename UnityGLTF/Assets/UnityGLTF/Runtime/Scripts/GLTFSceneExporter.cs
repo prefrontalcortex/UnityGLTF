@@ -1136,19 +1136,19 @@ namespace UnityGLTF
 			{
 				AccessorId aPosition = null, aNormal = null, aTangent = null, aTexcoord0 = null, aTexcoord1 = null, aColor0 = null;
 
-				aPosition = ExportAccessor(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(meshObj.vertices, SchemaExtensions.CoordinateSpaceConversionScale));
+				aPosition = ExportAccessorVec3(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(meshObj.vertices, SchemaExtensions.CoordinateSpaceConversionScale));
 
 				if (meshObj.normals.Length != 0)
-					aNormal = ExportAccessor(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(meshObj.normals, SchemaExtensions.CoordinateSpaceConversionScale));
+					aNormal = ExportAccessorVec3(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(meshObj.normals, SchemaExtensions.CoordinateSpaceConversionScale));
 
 				if (meshObj.tangents.Length != 0)
-					aTangent = ExportAccessor(SchemaExtensions.ConvertVector4CoordinateSpaceAndCopy(meshObj.tangents, SchemaExtensions.TangentSpaceConversionScale));
+					aTangent = ExportAccessorVec4(SchemaExtensions.ConvertVector4CoordinateSpaceAndCopy(meshObj.tangents, SchemaExtensions.TangentSpaceConversionScale));
 
 				if (meshObj.uv.Length != 0)
-					aTexcoord0 = ExportAccessor(SchemaExtensions.FlipTexCoordArrayVAndCopy(meshObj.uv));
+					aTexcoord0 = ExportAccessorVec2(SchemaExtensions.FlipTexCoordArrayVAndCopy(meshObj.uv));
 
 				if (meshObj.uv2.Length != 0)
-					aTexcoord1 = ExportAccessor(SchemaExtensions.FlipTexCoordArrayVAndCopy(meshObj.uv2));
+					aTexcoord1 = ExportAccessorVec2(SchemaExtensions.FlipTexCoordArrayVAndCopy(meshObj.uv2));
 
 				if (settings.ExportVertexColors && meshObj.colors.Length != 0)
 					aColor0 = ExportAccessor(QualitySettings.activeColorSpace == ColorSpace.Linear ? meshObj.colors : meshObj.colors.ToLinear());
@@ -1522,7 +1522,7 @@ namespace UnityGLTF
 
 					if (!settings.BlendShapeExportSparseAccessors)
 					{
-						exportTargets.Add(SemanticProperties.POSITION, ExportAccessor(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(deltaVertices, SchemaExtensions.CoordinateSpaceConversionScale)));
+						exportTargets.Add(SemanticProperties.POSITION, ExportAccessorVec3(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(deltaVertices, SchemaExtensions.CoordinateSpaceConversionScale)));
 					}
 					else
 					{
@@ -1542,7 +1542,7 @@ namespace UnityGLTF
 					{
 						if (!settings.BlendShapeExportSparseAccessors)
 						{
-							exportTargets.Add(SemanticProperties.NORMAL, ExportAccessor(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(deltaNormals, SchemaExtensions.CoordinateSpaceConversionScale)));
+							exportTargets.Add(SemanticProperties.NORMAL, ExportAccessorVec3(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(deltaNormals, SchemaExtensions.CoordinateSpaceConversionScale)));
 						}
 						else
 						{
@@ -1554,13 +1554,13 @@ namespace UnityGLTF
 					{
 						if (!settings.BlendShapeExportSparseAccessors)
 						{
-							exportTargets.Add(SemanticProperties.TANGENT, ExportAccessor(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(deltaTangents, SchemaExtensions.CoordinateSpaceConversionScale)));
+							exportTargets.Add(SemanticProperties.TANGENT, ExportAccessorVec3(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(deltaTangents, SchemaExtensions.CoordinateSpaceConversionScale)));
 						}
 						else
 						{
 							// 	var baseAccessor = _meshToPrims[meshObj].aTangent;
 							// 	exportTargets.Add(SemanticProperties.TANGENT, ExportSparseAccessor(baseAccessor, SchemaExtensions.ConvertVector4CoordinateSpaceAndCopy(meshObj.tangents, SchemaExtensions.TangentSpaceConversionScale), SchemaExtensions.ConvertVector4CoordinateSpaceAndCopy(deltaVertices, SchemaExtensions.TangentSpaceConversionScale)));
-							exportTargets.Add(SemanticProperties.TANGENT, ExportAccessor(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(deltaTangents, SchemaExtensions.CoordinateSpaceConversionScale)));
+							exportTargets.Add(SemanticProperties.TANGENT, ExportAccessorVec3(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(deltaTangents, SchemaExtensions.CoordinateSpaceConversionScale)));
 							Debug.LogWarning("Blend Shape Tangents for " + meshObj + " won't be exported with sparse accessors – sparse accessor for tangents isn't supported right now.");
 						}
 					}
@@ -2403,22 +2403,8 @@ namespace UnityGLTF
 			accessor.Count = count;
 			accessor.Type = GLTFAccessorAttributeType.SCALAR;
 
-			int min = arr[0];
-			int max = arr[0];
-
-			for (var i = 1; i < count; i++)
-			{
-				var cur = arr[i];
-
-				if (cur < min)
-				{
-					min = cur;
-				}
-				if (cur > max)
-				{
-					max = cur;
-				}
-			}
+			int min = arr.Min(v => v);
+			int max = arr.Max(v => v);
 
 			AlignToBoundary(_bufferWriter.BaseStream, 0x00);
 			uint byteOffset = CalculateAlignment((uint)_bufferWriter.BaseStream.Position, 4);
@@ -2501,7 +2487,7 @@ namespace UnityGLTF
 			return id;
 		}
 
-		private AccessorId ExportAccessor(Vector2[] arr)
+		private AccessorId ExportAccessorVec2(Vector2[] arr)
 		{
 			uint count = (uint)arr.Length;
 
@@ -2515,32 +2501,10 @@ namespace UnityGLTF
 			accessor.Count = count;
 			accessor.Type = GLTFAccessorAttributeType.VEC2;
 
-			float minX = arr[0].x == float.NaN ? 0 : arr[0].x;
-			float minY = arr[0].y == float.NaN ? 0 : arr[0].y;
-			float maxX = minX;
-			float maxY = minY;
-
-			for (var i = 1; i < count; i++)
-			{
-				var cur = arr[i];
-
-				if (cur.x < minX)
-				{
-					minX = cur.x;
-				}
-				if (cur.y < minY)
-				{
-					minY = cur.y;
-				}
-				if (cur.x > maxX)
-				{
-					maxX = cur.x;
-				}
-				if (cur.y > maxY)
-				{
-					maxY = cur.y;
-				}
-			}
+			float minX = arr.Min(v => v.x);
+			float minY = arr.Min(v => v.y);
+			float maxX = arr.Max(v => v.x);
+			float maxY = arr.Max(v => v.y);
 
 			accessor.Min = new List<double> { minX, minY };
 			accessor.Max = new List<double> { maxX, maxY };
@@ -2568,7 +2532,7 @@ namespace UnityGLTF
 			return id;
 		}
 
-		private AccessorId ExportAccessor(Vector3[] arr)
+		private AccessorId ExportAccessorVec3(Vector3[] arr)
 		{
 			uint count = (uint)arr.Length;
 
@@ -2582,42 +2546,12 @@ namespace UnityGLTF
 			accessor.Count = count;
 			accessor.Type = GLTFAccessorAttributeType.VEC3;
 
-			float minX = arr[0].x;
-			float minY = arr[0].y;
-			float minZ = arr[0].z;
-			float maxX = arr[0].x;
-			float maxY = arr[0].y;
-			float maxZ = arr[0].z;
-
-			for (var i = 1; i < count; i++)
-			{
-				var cur = arr[i];
-
-				if (cur.x < minX)
-				{
-					minX = cur.x;
-				}
-				if (cur.y < minY)
-				{
-					minY = cur.y;
-				}
-				if (cur.z < minZ)
-				{
-					minZ = cur.z;
-				}
-				if (cur.x > maxX)
-				{
-					maxX = cur.x;
-				}
-				if (cur.y > maxY)
-				{
-					maxY = cur.y;
-				}
-				if (cur.z > maxZ)
-				{
-					maxZ = cur.z;
-				}
-			}
+			float minX = arr.Min(v => v.x);
+			float minY = arr.Min(v => v.y);
+			float minZ = arr.Min(v => v.z);
+			float maxX = arr.Max(v => v.x);
+			float maxY = arr.Max(v => v.y);
+			float maxZ = arr.Max(v => v.z);
 
 			accessor.Min = new List<double> { minX, minY, minZ };
 			accessor.Max = new List<double> { maxX, maxY, maxZ };
@@ -2707,43 +2641,14 @@ namespace UnityGLTF
 			// we need to calculate the min/max of the entire new data array
 			uint count = (uint) arr.Length;
 
-			var firstElement = baseData != null ? (baseData[0] + arr[0]) : arr[0];
-			float minX = firstElement.x;
-			float minY = firstElement.y;
-			float minZ = firstElement.z;
-			float maxX = firstElement.x;
-			float maxY = firstElement.y;
-			float maxZ = firstElement.z;
+			var arrZippedWithBase = baseData != null ? arr.Zip(baseData, (v, b) => b + v) : arr;
 
-			for (var i = 1; i < count; i++)
-			{
-				var cur = baseData != null ? (baseData[i] + arr[i]) : arr[i];
-
-				if (cur.x < minX)
-				{
-					minX = cur.x;
-				}
-				if (cur.y < minY)
-				{
-					minY = cur.y;
-				}
-				if (cur.z < minZ)
-				{
-					minZ = cur.z;
-				}
-				if (cur.x > maxX)
-				{
-					maxX = cur.x;
-				}
-				if (cur.y > maxY)
-				{
-					maxY = cur.y;
-				}
-				if (cur.z > maxZ)
-				{
-					maxZ = cur.z;
-				}
-			}
+			float minX = arrZippedWithBase.Min(v => v.x);
+			float minY = arrZippedWithBase.Min(v => v.y);
+			float minZ = arrZippedWithBase.Min(v => v.z);
+			float maxX = arrZippedWithBase.Max(v => v.x);
+			float maxY = arrZippedWithBase.Max(v => v.y);
+			float maxZ = arrZippedWithBase.Max(v => v.z);
 
 			accessor.Min = new List<double> { minX, minY, minZ };
 			accessor.Max = new List<double> { maxX, maxY, maxZ };
@@ -2795,7 +2700,7 @@ namespace UnityGLTF
 			return id;
 		}
 
-		private AccessorId ExportAccessor(Vector4[] arr)
+		private AccessorId ExportAccessorVec4(Vector4[] arr)
 		{
 			uint count = (uint)arr.Length;
 
@@ -2809,52 +2714,14 @@ namespace UnityGLTF
 			accessor.Count = count;
 			accessor.Type = GLTFAccessorAttributeType.VEC4;
 
-			float minX = arr[0].x;
-			float minY = arr[0].y;
-			float minZ = arr[0].z;
-			float minW = arr[0].w;
-			float maxX = arr[0].x;
-			float maxY = arr[0].y;
-			float maxZ = arr[0].z;
-			float maxW = arr[0].w;
-
-			for (var i = 1; i < count; i++)
-			{
-				var cur = arr[i];
-
-				if (cur.x < minX)
-				{
-					minX = cur.x;
-				}
-				if (cur.y < minY)
-				{
-					minY = cur.y;
-				}
-				if (cur.z < minZ)
-				{
-					minZ = cur.z;
-				}
-				if (cur.w < minW)
-				{
-					minW = cur.w;
-				}
-				if (cur.x > maxX)
-				{
-					maxX = cur.x;
-				}
-				if (cur.y > maxY)
-				{
-					maxY = cur.y;
-				}
-				if (cur.z > maxZ)
-				{
-					maxZ = cur.z;
-				}
-				if (cur.w > maxW)
-				{
-					maxW = cur.w;
-				}
-			}
+			float minX = arr.Min(v => v.x);
+			float minY = arr.Min(v => v.y);
+			float minZ = arr.Min(v => v.z);
+			float minW = arr.Min(v => v.w);
+			float maxX = arr.Max(v => v.x);
+			float maxY = arr.Max(v => v.y);
+			float maxZ = arr.Max(v => v.z);
+			float maxW = arr.Max(v => v.w);
 
 			accessor.Min = new List<double> { minX, minY, minZ, minW };
 			accessor.Max = new List<double> { maxX, maxY, maxZ, maxW };
@@ -2898,52 +2765,15 @@ namespace UnityGLTF
 			accessor.Count = count;
 			accessor.Type = GLTFAccessorAttributeType.VEC4;
 
-			float minR = arr[0].r;
-			float minG = arr[0].g;
-			float minB = arr[0].b;
-			float minA = arr[0].a;
-			float maxR = arr[0].r;
-			float maxG = arr[0].g;
-			float maxB = arr[0].b;
-			float maxA = arr[0].a;
 
-			for (var i = 1; i < count; i++)
-			{
-				var cur = arr[i];
-
-				if (cur.r < minR)
-				{
-					minR = cur.r;
-				}
-				if (cur.g < minG)
-				{
-					minG = cur.g;
-				}
-				if (cur.b < minB)
-				{
-					minB = cur.b;
-				}
-				if (cur.a < minA)
-				{
-					minA = cur.a;
-				}
-				if (cur.r > maxR)
-				{
-					maxR = cur.r;
-				}
-				if (cur.g > maxG)
-				{
-					maxG = cur.g;
-				}
-				if (cur.b > maxB)
-				{
-					maxB = cur.b;
-				}
-				if (cur.a > maxA)
-				{
-					maxA = cur.a;
-				}
-			}
+			float minR = arr.Min(c => c.r);
+			float minG = arr.Min(c => c.g);
+			float minB = arr.Min(c => c.b);
+			float minA = arr.Min(c => c.a);
+			float maxR = arr.Max(c => c.r);
+			float maxG = arr.Max(c => c.g);
+			float maxB = arr.Max(c => c.b);
+			float maxA = arr.Max(c => c.a);
 
 			accessor.Min = new List<double> { minR, minG, minB, minA };
 			accessor.Max = new List<double> { maxR, maxG, maxB, maxA };
@@ -3281,7 +3111,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 
 					if(haveAnimation)
 					{
-						AccessorId timeAccessor = ExportAccessor(times);
+						AccessorId timeAccessor = ExportAccessorFloat(times);
 
 						// Translation
 						if(positions != null)
@@ -3299,7 +3129,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 
 							AnimationSampler Tsampler = new AnimationSampler();
 							Tsampler.Input = timeAccessor;
-							Tsampler.Output = ExportAccessor(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(positions, SchemaExtensions.CoordinateSpaceConversionScale));
+							Tsampler.Output = ExportAccessorVec3(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(positions, SchemaExtensions.CoordinateSpaceConversionScale));
 							Tchannel.Sampler = new AnimationSamplerId
 							{
 								Id = animation.Samplers.Count,
@@ -3327,7 +3157,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 
 							AnimationSampler Rsampler = new AnimationSampler();
 							Rsampler.Input = timeAccessor; // Float, for time
-							Rsampler.Output = ExportAccessor(rotations, true); // Vec4 for
+							Rsampler.Output = ExportAccessorVec4(rotations, true); // Vec4 for
 							Rchannel.Sampler = new AnimationSamplerId
 							{
 								Id = animation.Samplers.Count,
@@ -3355,7 +3185,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 
 							AnimationSampler Ssampler = new AnimationSampler();
 							Ssampler.Input = timeAccessor; // Float, for time
-							Ssampler.Output = ExportAccessor(scales); // Vec3 for scale
+							Ssampler.Output = ExportAccessorVec3(scales); // Vec3 for scale
 							Schannel.Sampler = new AnimationSamplerId
 							{
 								Id = animation.Samplers.Count,
@@ -3382,7 +3212,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 
 							AnimationSampler Wsampler = new AnimationSampler();
 							Wsampler.Input = timeAccessor;
-							Wsampler.Output = ExportAccessor(weights);
+							Wsampler.Output = ExportAccessorFloat(weights);
 							Wchannel.Sampler = new AnimationSamplerId()
 							{
 								Id = animation.Samplers.Count,
@@ -3798,7 +3628,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 					});
 			}
 
-			gltfSkin.InverseBindMatrices = ExportAccessor(mesh.bindposes);
+			gltfSkin.InverseBindMatrices = ExportAccessorMatrix(mesh.bindposes);
 
 			Vector4[] bones = boneWeightToBoneVec4(mesh.boneWeights);
 			Vector4[] weights = boneWeightToWeightVec4(mesh.boneWeights);
@@ -3809,7 +3639,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 				if (!prim.Attributes.ContainsKey("JOINTS_0"))
 					prim.Attributes.Add("JOINTS_0", ExportAccessorUint(bones));
 				if (!prim.Attributes.ContainsKey("WEIGHTS_0"))
-					prim.Attributes.Add("WEIGHTS_0", ExportAccessor(weights));
+					prim.Attributes.Add("WEIGHTS_0", ExportAccessorVec4(weights));
 			}
 
 			_root.Nodes[_exportedTransforms[transform.GetInstanceID()]].Skin = new SkinId() { Id = _root.Skins.Count, Root = _root };
@@ -3852,52 +3682,14 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 			accessor.Count = count;
 			accessor.Type = GLTFAccessorAttributeType.VEC4;
 
-			float minX = arr[0].x;
-			float minY = arr[0].y;
-			float minZ = arr[0].z;
-			float minW = arr[0].w;
-			float maxX = arr[0].x;
-			float maxY = arr[0].y;
-			float maxZ = arr[0].z;
-			float maxW = arr[0].w;
-
-			for (var i = 1; i < count; i++)
-			{
-				var cur = arr[i];
-
-				if (cur.x < minX)
-				{
-					minX = cur.x;
-				}
-				if (cur.y < minY)
-				{
-					minY = cur.y;
-				}
-				if (cur.z < minZ)
-				{
-					minZ = cur.z;
-				}
-				if (cur.w < minW)
-				{
-					minW = cur.w;
-				}
-				if (cur.x > maxX)
-				{
-					maxX = cur.x;
-				}
-				if (cur.y > maxY)
-				{
-					maxY = cur.y;
-				}
-				if (cur.z > maxZ)
-				{
-					maxZ = cur.z;
-				}
-				if (cur.w > maxW)
-				{
-					maxW = cur.w;
-				}
-			}
+			float minX = arr.Min(v => v.x);
+			float minY = arr.Min(v => v.y);
+			float minZ = arr.Min(v => v.z);
+			float minW = arr.Min(v => v.w);
+			float maxX = arr.Max(v => v.x);
+			float maxY = arr.Max(v => v.y);
+			float maxZ = arr.Max(v => v.z);
+			float maxW = arr.Max(v => v.w);
 
 			accessor.Min = new List<double> { minX, minY, minZ, minW };
 			accessor.Max = new List<double> { maxX, maxY, maxZ, maxW };
@@ -3928,7 +3720,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 		}
 
 		// This is used for Quaternions / Rotations
-		private AccessorId ExportAccessor(Vector4[] arr, bool switchHandedness = false)
+		private AccessorId ExportAccessorVec4(Vector4[] arr, bool switchHandedness = false)
 		{
 			var count = (uint)arr.Length;
 
@@ -3942,57 +3734,17 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 			accessor.Count = count;
 			accessor.Type = GLTFAccessorAttributeType.VEC4;
 
-			var a0 = arr[0];
-			a0 = switchHandedness ? a0.switchHandedness() : a0;
-			a0 = a0.normalized;
-			float minX = a0.x;
-			float minY = a0.y;
-			float minZ = a0.z;
-			float minW = a0.w;
-			float maxX = a0.x;
-			float maxY = a0.y;
-			float maxZ = a0.z;
-			float maxW = a0.w;
+			var arrSwitched = switchHandedness ? arr.Select(v => v.switchHandedness()) : arr;
+			arrSwitched = arrSwitched.Select(x => x.normalized);
 
-			for (var i = 1; i < count; i++)
-			{
-				var cur = arr[i];
-				cur = switchHandedness ? cur.switchHandedness() : cur;
-				cur = cur.normalized;
-
-				if (cur.x < minX)
-				{
-					minX = cur.x;
-				}
-				if (cur.y < minY)
-				{
-					minY = cur.y;
-				}
-				if (cur.z < minZ)
-				{
-					minZ = cur.z;
-				}
-				if (cur.w < minW)
-				{
-					minW = cur.w;
-				}
-				if (cur.x > maxX)
-				{
-					maxX = cur.x;
-				}
-				if (cur.y > maxY)
-				{
-					maxY = cur.y;
-				}
-				if (cur.z > maxZ)
-				{
-					maxZ = cur.z;
-				}
-				if (cur.w > maxW)
-				{
-					maxW = cur.w;
-				}
-			}
+			float minX = arrSwitched.Min(v => v.x);
+			float minY = arrSwitched.Min(v => v.y);
+			float minZ = arrSwitched.Min(v => v.z);
+			float minW = arrSwitched.Min(v => v.w);
+			float maxX = arrSwitched.Max(v => v.x);
+			float maxY = arrSwitched.Max(v => v.y);
+			float maxZ = arrSwitched.Max(v => v.z);
+			float maxW = arrSwitched.Max(v => v.w);
 
 			accessor.Min = new List<double> { minX, minY, minZ, minW };
 			accessor.Max = new List<double> { maxX, maxY, maxZ, maxW };
@@ -4000,14 +3752,12 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 			AlignToBoundary(_bufferWriter.BaseStream, 0x00);
 			uint byteOffset = CalculateAlignment((uint)_bufferWriter.BaseStream.Position, 4);
 
-			foreach (var vec in arr)
+			foreach (var vec in arrSwitched)
 			{
-				Vector4 vect = switchHandedness ? vec.switchHandedness() : vec;
-				vect = vect.normalized;
-				_bufferWriter.Write(vect.x);
-				_bufferWriter.Write(vect.y);
-				_bufferWriter.Write(vect.z);
-				_bufferWriter.Write(vect.w);
+				_bufferWriter.Write(vec.x);
+				_bufferWriter.Write(vec.y);
+				_bufferWriter.Write(vec.z);
+				_bufferWriter.Write(vec.w);
 			}
 
 			uint byteLength = CalculateAlignment((uint)_bufferWriter.BaseStream.Position - byteOffset, 4);
@@ -4024,7 +3774,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 			return id;
 		}
 
-		private AccessorId ExportAccessor(float[] arr)
+		private AccessorId ExportAccessorFloat(float[] arr)
 		{
 			var count = (uint)arr.Length;
 
@@ -4038,22 +3788,8 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 			accessor.Count = count;
 			accessor.Type = GLTFAccessorAttributeType.SCALAR;
 
-			float min = arr[0];
-			float max = arr[0];
-
-			for (var i = 1; i < count; i++)
-			{
-				var cur = arr[i];
-
-				if (cur < min)
-				{
-					min = cur;
-				}
-				if (cur > max)
-				{
-					max = cur;
-				}
-			}
+			float min = arr.Min(v => v);
+			float max = arr.Max(v => v);
 
 			accessor.Min = new List<double> { min };
 			accessor.Max = new List<double> { max };
@@ -4081,7 +3817,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 			return id;
 		}
 
-		private AccessorId ExportAccessor(Matrix4x4[] arr)
+		private AccessorId ExportAccessorMatrix(Matrix4x4[] arr)
 		{
 			var count = (uint)arr.Length;
 

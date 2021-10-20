@@ -444,8 +444,10 @@ namespace UnityGLTF.Extensions
 
 			for (var i = 0; i < array.Length; i++)
 			{
-				returnArray[i].x = array[i].x;
-				returnArray[i].y = 1.0f - array[i].y;
+				var x = array[i].x;
+				var y = 1.0f - array[i].y;
+				returnArray[i].x = float.IsNaN(x) ? 0 : x;
+				returnArray[i].y = float.IsNaN(y) ? 0 : y;
 			}
 
 			return returnArray;
@@ -478,9 +480,9 @@ namespace UnityGLTF.Extensions
 
 			for (int i = 0; i < array.Length; i++)
 			{
-				returnArray[i].x = array[i].x * coordinateSpaceCoordinateScale.X;
-				returnArray[i].y = array[i].y * coordinateSpaceCoordinateScale.Y;
-				returnArray[i].z = array[i].z * coordinateSpaceCoordinateScale.Z;
+				returnArray[i].x = (float.IsNaN(array[i].x) ? 0 : array[i].x) * coordinateSpaceCoordinateScale.X;
+				returnArray[i].y = (float.IsNaN(array[i].y) ? 0 : array[i].y) * coordinateSpaceCoordinateScale.Y;
+				returnArray[i].z = (float.IsNaN(array[i].z) ? 0 : array[i].z) * coordinateSpaceCoordinateScale.Z;
 			}
 
 			return returnArray;
@@ -514,10 +516,10 @@ namespace UnityGLTF.Extensions
 
 			for (var i = 0; i < array.Length; i++)
 			{
-				returnArray[i].x = array[i].x * coordinateSpaceCoordinateScale.X;
-				returnArray[i].y = array[i].y * coordinateSpaceCoordinateScale.Y;
-				returnArray[i].z = array[i].z * coordinateSpaceCoordinateScale.Z;
-				returnArray[i].w = array[i].w * coordinateSpaceCoordinateScale.W;
+				returnArray[i].x = (float.IsNaN(array[i].x) ? 0 : array[i].x) * coordinateSpaceCoordinateScale.X;
+				returnArray[i].y = (float.IsNaN(array[i].y) ? 0 : array[i].y) * coordinateSpaceCoordinateScale.Y;
+				returnArray[i].z = (float.IsNaN(array[i].z) ? 0 : array[i].z) * coordinateSpaceCoordinateScale.Z;
+				returnArray[i].w = (float.IsNaN(array[i].w) ? 0 : array[i].w) * coordinateSpaceCoordinateScale.W;
 			}
 
 			return returnArray;
