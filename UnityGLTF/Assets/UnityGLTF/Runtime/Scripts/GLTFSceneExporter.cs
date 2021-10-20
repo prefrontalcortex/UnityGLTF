@@ -197,6 +197,7 @@ namespace UnityGLTF
 
 		private static int AnimationBakingFramerate = 30; // FPS
 		private static bool BakeAnimationData = true;
+		private Dictionary<Hash128, string> _textureNames = new Dictionary<Hash128, string>();
 
 		/// <summary>
 		/// Create a GLTFExporter that exports out a transform
@@ -254,6 +255,7 @@ namespace UnityGLTF
 			_imageInfos = new List<ImageInfo>();
 			_materials = new List<Material>();
 			_textures = new List<Texture>();
+			_textureNames = new Dictionary<Hash128, string>();
 
 			_buffer = new GLTFBuffer();
 			_bufferId = new BufferId
@@ -1151,7 +1153,7 @@ namespace UnityGLTF
 					aTexcoord1 = ExportAccessorVec2(SchemaExtensions.FlipTexCoordArrayVAndCopy(meshObj.uv2));
 
 				if (settings.ExportVertexColors && meshObj.colors.Length != 0)
-					aColor0 = ExportAccessor(QualitySettings.activeColorSpace == ColorSpace.Linear ? meshObj.colors : meshObj.colors.ToLinear());
+					aColor0 = ExportAccessorColor(QualitySettings.activeColorSpace == ColorSpace.Linear ? meshObj.colors : meshObj.colors.ToLinear());
 
 				_meshToPrims.Add(meshObj, new MeshAccessors()
 				{
@@ -1206,9 +1208,12 @@ namespace UnityGLTF
 				}
 
 				var submeshPrimitive = accessors.subMeshPrimitives[submesh];
+				var hasUVs = accessors.aTexcoord0 != null;
+				var materialId = ExportMaterial(materialsObj[submesh], materialProperty);
+
 				prims[submesh] = new MeshPrimitive(submeshPrimitive, _root)
 				{
-					Material = ExportMaterial(materialsObj[submesh], materialProperty),
+					Material = materialId,
 				};
 			}
 
@@ -1350,7 +1355,8 @@ namespace UnityGLTF
 				if (materialObj.HasProperty("_EmissionColor"))
 				{
 					var c = materialObj.GetColor("_EmissionColor");
-					material.EmissiveFactor = c.ToNumericsColor();
+					if (c != Color.black && c != Color.clear)
+						material.EmissiveFactor = c.ToNumericsColor();
 				}
 
 				if (materialObj.HasProperty("_EmissionMap"))
@@ -2025,7 +2031,7 @@ namespace UnityGLTF
 				textureObj.name = (_root.Textures.Count + 1).ToString();
 			}
 
-			var textureName = GetTextureName(textureObj);
+			var textureName = GetUniqueTextureName(textureObj);
 			if (ExportNames)
 			{
 				texture.Name = textureName;
@@ -2094,7 +2100,7 @@ namespace UnityGLTF
 			}
 
 			var image = new GLTFImage();
-			var textureName = GetTextureName(texture);
+			var textureName = GetUniqueTextureName(texture);
 			if (ExportNames)
 			{
 				image.Name = textureName;
@@ -2149,7 +2155,26 @@ namespace UnityGLTF
 			var name = texture.name;
 			//name = EnsureValidFileName(name);
 			name = name.Replace('.', '_');
+			var success = _textureNames.TryGetValue(texture.imageContentsHash, out name);
 			return name;
+		}
+
+		private string GetUniqueTextureName(Texture texture)
+		{
+			var name = texture.name;
+			var textureHash = texture.imageContentsHash;
+			//name = EnsureValidFileName(name);
+			name = name.Replace('.', '_');
+			var uniqueName = name;
+			var number = 0;
+			var isUniqueTexture = _textures.All(x => x.imageContentsHash != textureHash);
+			while (isUniqueTexture && _textureNames.ContainsValue(uniqueName) && number++ < 1000)
+				uniqueName = name + number.ToString();
+
+			if (!_textureNames.ContainsKey(textureHash))
+				_textureNames.Add(textureHash, uniqueName);
+
+			return uniqueName;
 		}
 
 		bool TryGetTextureDataFromDisk(TextureMapType textureMapType, Texture texture, out string path, out byte[] data)
@@ -2751,7 +2776,7 @@ namespace UnityGLTF
 			return id;
 		}
 
-		private AccessorId ExportAccessor(Color[] arr)
+		private AccessorId ExportAccessorColor(Color[] arr)
 		{
 			uint count = (uint)arr.Length;
 
