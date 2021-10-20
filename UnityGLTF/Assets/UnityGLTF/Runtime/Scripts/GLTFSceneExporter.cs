@@ -2102,7 +2102,6 @@ namespace UnityGLTF
 			}
 
 			var image = new GLTFImage();
-			SetUniqueTextureName(texture);
 			if (ExportNames)
 			{
 				image.Name = texture.name;
@@ -2115,6 +2114,7 @@ namespace UnityGLTF
                 RenderTexture.active = texture as RenderTexture;
                 tempTexture.ReadPixels(new Rect(0, 0, texture.width, texture.height), 0, 0);
                 tempTexture.Apply();
+				tempTexture.name = texture.name;
                 texture = tempTexture;
             }
 #if UNITY_2017_1_OR_NEWER
@@ -2125,6 +2125,7 @@ namespace UnityGLTF
                 RenderTexture.active = texture as CustomRenderTexture;
                 tempTexture.ReadPixels(new Rect(0, 0, texture.width, texture.height), 0, 0);
                 tempTexture.Apply();
+				tempTexture.name = texture.name;
 				texture = tempTexture;
             }
 #endif
@@ -2172,7 +2173,8 @@ namespace UnityGLTF
 
 			if (isUniqueTexture)
 				_textureHashes.Add(textureHash, uniqueName);
-
+			else
+				uniqueName = _textureHashes[textureHash];
 			texture.name = uniqueName;
 		}
 
@@ -2185,7 +2187,7 @@ namespace UnityGLTF
 		{
 			var hash = CombineHashCodes(tex.width, tex.height);
 			var pixels = tex.GetPixels32();
-			var numberOfSamples = 10;
+			var numberOfSamples = Mathf.Min(59, pixels.Length);
 			var pixelStep = pixels.Length / numberOfSamples;
 			for (int i = 0; i < numberOfSamples; i++)
 			{
