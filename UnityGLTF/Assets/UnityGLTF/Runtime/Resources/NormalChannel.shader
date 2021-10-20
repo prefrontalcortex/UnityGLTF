@@ -56,14 +56,14 @@
 				float4 col = tex2D(_MainTex, i.uv);
 				// If a texture is marked as a normal map
 				// the values are stored in the A and G channel.
-				//float3 unpacked = UnpackNormal(col);
+				float3 unpacked = UnpackNormal(col);
 				// unpacked.xyz = LinearToGammaSpace(unpacked.xyz);
-				float4 result = float4(col.rgb * 0.5f + 0.5f, 1);
+				float4 result = float4(unpacked * 0.5f + 0.5f, 1);
 				#ifdef UNITY_COLORSPACE_GAMMA
-				#else
 				// hack for linear color space, need to figure out
 				// right way to sample textures.
 				result.xyz = GammaToLinearSpace(result.xyz);
+				#else
 				#endif
 				return result;
 			}
