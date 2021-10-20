@@ -1349,7 +1349,7 @@ namespace UnityGLTF
 				if (materialObj.HasProperty("_EmissionColor"))
 				{
 					var c = materialObj.GetColor("_EmissionColor");
-					material.EmissiveFactor = c.ToNumericsColorLinear();
+					material.EmissiveFactor = c.ToNumericsColor();
 				}
 
 				if (materialObj.HasProperty("_EmissionMap"))
@@ -1425,22 +1425,24 @@ namespace UnityGLTF
 			else if (materialObj.HasProperty("_BaseMap"))
 			{
 				var mainTex = materialObj.GetTexture("_BaseMap");
+				var color = (materialObj.HasProperty("_BaseColor")
+						? materialObj.GetColor("_BaseColor")
+						: Color.white).ToNumericsColor();
 				material.PbrMetallicRoughness = new PbrMetallicRoughness()
 				{
-					BaseColorFactor = (materialObj.HasProperty("_BaseColor")
-						? materialObj.GetColor("_BaseColor")
-						: Color.white).ToNumericsColorLinear(),
+					BaseColorFactor = color,
 					BaseColorTexture = mainTex ? ExportTextureInfo(mainTex, TextureMapType.Main) : null
 				};
 			}
 			else if (materialObj.HasProperty("_ColorTexture"))
 			{
 				var mainTex = materialObj.GetTexture("_ColorTexture");
+				var color = (materialObj.HasProperty("_BaseColor")
+						? materialObj.GetColor("_BaseColor")
+						: Color.white).ToNumericsColor();
 				material.PbrMetallicRoughness = new PbrMetallicRoughness()
 				{
-					BaseColorFactor = (materialObj.HasProperty("_BaseColor")
-						? materialObj.GetColor("_BaseColor")
-						: Color.white).ToNumericsColorLinear(),
+					BaseColorFactor = color,
 					BaseColorTexture = mainTex ? ExportTextureInfo(mainTex, TextureMapType.Main) : null
 				};
 			}
@@ -1459,7 +1461,7 @@ namespace UnityGLTF
                     if (material.PbrMetallicRoughness == null)
                         material.PbrMetallicRoughness = new PbrMetallicRoughness() { MetallicFactor = 0, RoughnessFactor = 1.0f };
 
-                    material.PbrMetallicRoughness.BaseColorFactor = materialObj.GetColor("_TintColor").ToNumericsColorLinear();
+                    material.PbrMetallicRoughness.BaseColorFactor = materialObj.GetColor("_TintColor").ToNumericsColor();
                 }
                 material.DoubleSided = true;
             }
@@ -1729,11 +1731,11 @@ namespace UnityGLTF
 
 			if (material.HasProperty("_BaseColor"))
 			{
-				pbr.BaseColorFactor = material.GetColor("_BaseColor").ToNumericsColorLinear();
+				pbr.BaseColorFactor = material.GetColor("_BaseColor").ToNumericsColor();
 			}
 			else if (material.HasProperty("_Color"))
 			{
-				pbr.BaseColorFactor = material.GetColor("_Color").ToNumericsColorLinear();
+				pbr.BaseColorFactor = material.GetColor("_Color").ToNumericsColor();
 			}
 
             if (material.HasProperty("_TintColor")) //particles use _TintColor instead of _Color
@@ -1745,7 +1747,7 @@ namespace UnityGLTF
                     white = (c.r + c.g + c.b) / 3.0f; //multiply alpha by overall whiteness of TintColor
                 }
 
-                pbr.BaseColorFactor = (material.GetColor("_TintColor") * white).ToNumericsColorLinear() ;
+                pbr.BaseColorFactor = (material.GetColor("_TintColor") * white).ToNumericsColor() ;
             }
 
             if (material.HasProperty("_MainTex") || material.HasProperty("_BaseMap")) //TODO if additive particle, render black into alpha
@@ -1781,7 +1783,9 @@ namespace UnityGLTF
 				// legacy workaround: the UnityGLTF shaders misuse "_Glossiness" as roughness but don't have a keyword for it.
 				if(material.shader.name.Equals("GLTF/PbrMetallicRoughness", StringComparison.Ordinal))
 					smoothness = 1 - smoothness;
-				pbr.RoughnessFactor = (metallicGlossMap && material.HasProperty("_GlossMapScale")) ? material.GetFloat("_GlossMapScale") : 1.0 - smoothness;
+				var roughnessFactor = (metallicGlossMap && material.HasProperty("_GlossMapScale")) ? material.GetFloat("_GlossMapScale") : 1.0f - smoothness;
+				roughnessFactor = Mathf.Clamp01(roughnessFactor);
+				pbr.RoughnessFactor = roughnessFactor;
 			}
 
 			if (material.HasProperty("_MetallicGlossMap"))
@@ -1817,7 +1821,7 @@ namespace UnityGLTF
 
 			if (material.HasProperty("_Color"))
 			{
-				pbr.BaseColorFactor = material.GetColor("_Color").ToNumericsColorLinear();
+				pbr.BaseColorFactor = material.GetColor("_Color").ToNumericsColor();
 			}
 
 			if (material.HasProperty("_MainTex"))
@@ -1878,7 +1882,7 @@ namespace UnityGLTF
 
 			if (materialObj.HasProperty("_Color"))
 			{
-				diffuseFactor = materialObj.GetColor("_Color").ToNumericsColorLinear();
+				diffuseFactor = materialObj.GetColor("_Color").ToNumericsColor();
 			}
 
 			if (materialObj.HasProperty("_MainTex"))
@@ -1904,7 +1908,7 @@ namespace UnityGLTF
 				var specGlossMap = materialObj.GetTexture("_SpecGlossMap");
 				if (specGlossMap == null)
 				{
-					var specColor = materialObj.GetColor("_SpecColor").ToNumericsColorLinear();
+					var specColor = materialObj.GetColor("_SpecColor").ToNumericsColor();
 					specularFactor = new GLTF.Math.Vector3(specColor.R, specColor.G, specColor.B);
 				}
 			}
@@ -1972,7 +1976,7 @@ namespace UnityGLTF
 
 			if (materialObj.HasProperty("_AmbientFactor"))
 			{
-				constant.AmbientFactor = materialObj.GetColor("_AmbientFactor").ToNumericsColorRaw();
+				constant.AmbientFactor = materialObj.GetColor("_AmbientFactor").ToNumericsColor();
 			}
 
 			if (materialObj.HasProperty("_LightMap"))
@@ -1989,7 +1993,7 @@ namespace UnityGLTF
 
 			if (materialObj.HasProperty("_LightFactor"))
 			{
-				constant.LightmapFactor = materialObj.GetColor("_LightFactor").ToNumericsColorRaw();
+				constant.LightmapFactor = materialObj.GetColor("_LightFactor").ToNumericsColor();
 			}
 
 			return constant;
@@ -2500,10 +2504,10 @@ namespace UnityGLTF
 			accessor.Count = count;
 			accessor.Type = GLTFAccessorAttributeType.VEC2;
 
-			float minX = arr[0].x;
-			float minY = arr[0].y;
-			float maxX = arr[0].x;
-			float maxY = arr[0].y;
+			float minX = arr[0].x == float.NaN ? 0 : arr[0].x;
+			float minY = arr[0].y == float.NaN ? 0 : arr[0].y;
+			float maxX = minX;
+			float maxY = minY;
 
 			for (var i = 1; i < count; i++)
 			{

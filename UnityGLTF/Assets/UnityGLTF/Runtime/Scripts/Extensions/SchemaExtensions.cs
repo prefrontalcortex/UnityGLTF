@@ -332,6 +332,14 @@ namespace UnityGLTF.Extensions
 			return c;
 		}
 
+		public static GLTF.Math.Color ToNumericsColor(this UnityEngine.Color color)
+		{
+			if (QualitySettings.activeColorSpace == ColorSpace.Linear)
+				return color.ToNumericsColorRaw();
+			else
+				return color.ToNumericsColorLinear();
+		}
+
 		public static GLTF.Math.Color ToNumericsColorRaw(this UnityEngine.Color color)
 		{
 			var c = color;
