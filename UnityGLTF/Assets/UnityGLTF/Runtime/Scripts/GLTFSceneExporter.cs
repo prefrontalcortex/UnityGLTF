@@ -83,6 +83,8 @@ namespace UnityGLTF
 		private List<Transform> _animatedNodes;
 		private List<Transform> _skinnedNodes;
 		private Dictionary<SkinnedMeshRenderer, UnityEngine.Mesh> _bakedMeshes;
+		private Dictionary<int, string> _textureHashes = new Dictionary<int, string>();
+		private Dictionary<int, string> _textureNames = new Dictionary<int, string>();
 
 		private int _exportLayerMask;
 		private ExportOptions _exportOptions;
@@ -255,6 +257,8 @@ namespace UnityGLTF
 			_imageInfos = new List<ImageInfo>();
 			_materials = new List<Material>();
 			_textures = new List<Texture>();
+			_textureHashes = new Dictionary<int, string>();
+			_textureNames = new Dictionary<int, string>();
 
 			_buffer = new GLTFBuffer();
 			_bufferId = new BufferId
@@ -655,15 +659,16 @@ namespace UnityGLTF
 		private string ConstructImageFilenamePath(Texture2D texture, string outputPath, string enforceExtension = null)
 		{
 			var imagePath = _exportOptions.TexturePathRetriever(texture);
+			var textureName = GetTextureName(texture);
 			if (string.IsNullOrEmpty(imagePath))
 			{
-				imagePath = Path.Combine(outputPath, texture.name);
+				imagePath = Path.Combine(outputPath, textureName);
 			}
 
 			var filenamePath = Path.Combine(outputPath, imagePath);
 			if (!ExportFullPath)
 			{
-				filenamePath = outputPath + "/" + texture.name;
+				filenamePath = outputPath + "/" + textureName;
 			}
 			var file = new FileInfo(filenamePath);
 			file.Directory.Create();
@@ -1127,6 +1132,8 @@ namespace UnityGLTF
 				return null;
 			}
 			var materialsObj = renderer ? renderer.sharedMaterials : smr.sharedMaterials;
+			MaterialPropertyBlock materialProperty = new MaterialPropertyBlock();
+			if (renderer) renderer.GetPropertyBlock(materialProperty);
 
 			var prims = new MeshPrimitive[meshObj.subMeshCount];
 			List<MeshPrimitive> nonEmptyPrims = null;
@@ -1141,22 +1148,22 @@ namespace UnityGLTF
 			{
 				AccessorId aPosition = null, aNormal = null, aTangent = null, aTexcoord0 = null, aTexcoord1 = null, aColor0 = null;
 
-				aPosition = ExportAccessor(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(meshObj.vertices, SchemaExtensions.CoordinateSpaceConversionScale));
+				aPosition = ExportAccessorVec3(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(meshObj.vertices, SchemaExtensions.CoordinateSpaceConversionScale));
 
 				if (meshObj.normals.Length != 0)
-					aNormal = ExportAccessor(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(meshObj.normals, SchemaExtensions.CoordinateSpaceConversionScale));
+					aNormal = ExportAccessorVec3(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(meshObj.normals, SchemaExtensions.CoordinateSpaceConversionScale));
 
 				if (meshObj.tangents.Length != 0)
-					aTangent = ExportAccessor(SchemaExtensions.ConvertVector4CoordinateSpaceAndCopy(meshObj.tangents, SchemaExtensions.TangentSpaceConversionScale));
+					aTangent = ExportAccessorVec4(SchemaExtensions.ConvertVector4CoordinateSpaceAndCopy(meshObj.tangents, SchemaExtensions.TangentSpaceConversionScale));
 
 				if (meshObj.uv.Length != 0)
-					aTexcoord0 = ExportAccessor(SchemaExtensions.FlipTexCoordArrayVAndCopy(meshObj.uv));
+					aTexcoord0 = ExportAccessorVec2(SchemaExtensions.FlipTexCoordArrayVAndCopy(meshObj.uv));
 
 				if (meshObj.uv2.Length != 0)
-					aTexcoord1 = ExportAccessor(SchemaExtensions.FlipTexCoordArrayVAndCopy(meshObj.uv2));
+					aTexcoord1 = ExportAccessorVec2(SchemaExtensions.FlipTexCoordArrayVAndCopy(meshObj.uv2));
 
 				if (settings.ExportVertexColors && meshObj.colors.Length != 0)
-					aColor0 = ExportAccessor(QualitySettings.activeColorSpace == ColorSpace.Linear ? meshObj.colors : meshObj.colors.ToLinear());
+					aColor0 = ExportAccessorColor(QualitySettings.activeColorSpace == ColorSpace.Linear ? meshObj.colors : meshObj.colors.ToLinear());
 
 				_meshToPrims.Add(meshObj, new MeshAccessors()
 				{
@@ -1211,9 +1218,12 @@ namespace UnityGLTF
 				}
 
 				var submeshPrimitive = accessors.subMeshPrimitives[submesh];
+				var hasUVs = accessors.aTexcoord0 != null;
+				var materialId = ExportMaterial(materialsObj[submesh], materialProperty);
+
 				prims[submesh] = new MeshPrimitive(submeshPrimitive, _root)
 				{
-					Material = ExportMaterial(materialsObj[submesh]),
+					Material = materialId,
 				};
 			}
 
@@ -1295,7 +1305,7 @@ namespace UnityGLTF
             return false;
         }
 
-        private MaterialId ExportMaterial(Material materialObj)
+        private MaterialId ExportMaterial(Material materialObj, MaterialPropertyBlock materialPropertyBlock)
 		{
             //TODO if material is null
 			MaterialId id = GetMaterialId(_root, materialObj);
@@ -1355,7 +1365,8 @@ namespace UnityGLTF
 				if (materialObj.HasProperty("_EmissionColor"))
 				{
 					var c = materialObj.GetColor("_EmissionColor");
-					material.EmissiveFactor = c.ToNumericsColorLinear();
+					if (c != Color.black && c != Color.clear)
+						material.EmissiveFactor = c.ToNumericsColor();
 				}
 
 				if (materialObj.HasProperty("_EmissionMap"))
@@ -1368,7 +1379,7 @@ namespace UnityGLTF
 						{
 							material.EmissiveTexture = ExportTextureInfo(emissionTex, TextureMapType.Emission);
 
-							ExportTextureTransform(material.EmissiveTexture, materialObj, "_EmissionMap");
+							ExportTextureTransform(material.EmissiveTexture, materialObj, materialPropertyBlock, "_EmissionMap");
 						}
 						else
 						{
@@ -1387,7 +1398,7 @@ namespace UnityGLTF
 					if(normalTex is Texture2D)
 					{
 						material.NormalTexture = ExportNormalTextureInfo(normalTex, TextureMapType.Bump, materialObj);
-						ExportTextureTransform(material.NormalTexture, materialObj, "_BumpMap");
+						ExportTextureTransform(material.NormalTexture, materialObj, materialPropertyBlock, "_BumpMap");
 					}
 					else
 					{
@@ -1404,7 +1415,7 @@ namespace UnityGLTF
 					if(occTex is Texture2D)
 					{
 						material.OcclusionTexture = ExportOcclusionTextureInfo(occTex, TextureMapType.Occlusion, materialObj);
-						ExportTextureTransform(material.OcclusionTexture, materialObj, "_OcclusionMap");
+						ExportTextureTransform(material.OcclusionTexture, materialObj, materialPropertyBlock, "_OcclusionMap");
 					}
 					else
 					{
@@ -1414,39 +1425,41 @@ namespace UnityGLTF
 			}
 			if( IsUnlit(materialObj)){
 
-				ExportUnlit( material, materialObj );
+				ExportUnlit( material, materialObj, materialPropertyBlock );
 			}
 			else if (IsPBRMetallicRoughness(materialObj))
 			{
-				material.PbrMetallicRoughness = ExportPBRMetallicRoughness(materialObj);
+				material.PbrMetallicRoughness = ExportPBRMetallicRoughness(materialObj, materialPropertyBlock);
 			}
 			else if (IsPBRSpecularGlossiness(materialObj))
 			{
-				ExportPBRSpecularGlossiness(material, materialObj);
+				ExportPBRSpecularGlossiness(material, materialObj, materialPropertyBlock);
 			}
 			else if (IsCommonConstant(materialObj))
 			{
-				material.CommonConstant = ExportCommonConstant(materialObj);
+				material.CommonConstant = ExportCommonConstant(materialObj, materialPropertyBlock);
 			}
 			else if (materialObj.HasProperty("_BaseMap"))
 			{
 				var mainTex = materialObj.GetTexture("_BaseMap");
+				var color = (materialObj.HasProperty("_BaseColor")
+						? materialObj.GetColor("_BaseColor")
+						: Color.white).ToNumericsColor();
 				material.PbrMetallicRoughness = new PbrMetallicRoughness()
 				{
-					BaseColorFactor = (materialObj.HasProperty("_BaseColor")
-						? materialObj.GetColor("_BaseColor")
-						: Color.white).ToNumericsColorLinear(),
+					BaseColorFactor = color,
 					BaseColorTexture = mainTex ? ExportTextureInfo(mainTex, TextureMapType.Main) : null
 				};
 			}
 			else if (materialObj.HasProperty("_ColorTexture"))
 			{
 				var mainTex = materialObj.GetTexture("_ColorTexture");
+				var color = (materialObj.HasProperty("_BaseColor")
+						? materialObj.GetColor("_BaseColor")
+						: Color.white).ToNumericsColor();
 				material.PbrMetallicRoughness = new PbrMetallicRoughness()
 				{
-					BaseColorFactor = (materialObj.HasProperty("_BaseColor")
-						? materialObj.GetColor("_BaseColor")
-						: Color.white).ToNumericsColorLinear(),
+					BaseColorFactor = color,
 					BaseColorTexture = mainTex ? ExportTextureInfo(mainTex, TextureMapType.Main) : null
 				};
 			}
@@ -1458,14 +1471,14 @@ namespace UnityGLTF
                 {
                     material.PbrMetallicRoughness = new PbrMetallicRoughness() { MetallicFactor = 0, RoughnessFactor = 1.0f };
                     material.PbrMetallicRoughness.BaseColorTexture = ExportTextureInfo(mainTex, TextureMapType.Main);
-                    ExportTextureTransform(material.PbrMetallicRoughness.BaseColorTexture, materialObj, "_MainTex");
+                    ExportTextureTransform(material.PbrMetallicRoughness.BaseColorTexture, materialObj, materialPropertyBlock, "_MainTex");
                 }
                 if (materialObj.HasProperty("_TintColor")) //particles use _TintColor instead of _Color
                 {
                     if (material.PbrMetallicRoughness == null)
                         material.PbrMetallicRoughness = new PbrMetallicRoughness() { MetallicFactor = 0, RoughnessFactor = 1.0f };
 
-                    material.PbrMetallicRoughness.BaseColorFactor = materialObj.GetColor("_TintColor").ToNumericsColorLinear();
+                    material.PbrMetallicRoughness.BaseColorFactor = materialObj.GetColor("_TintColor").ToNumericsColor();
                 }
                 material.DoubleSided = true;
             }
@@ -1525,7 +1538,7 @@ namespace UnityGLTF
 
 					if (!settings.BlendShapeExportSparseAccessors)
 					{
-						exportTargets.Add(SemanticProperties.POSITION, ExportAccessor(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(deltaVertices, SchemaExtensions.CoordinateSpaceConversionScale)));
+						exportTargets.Add(SemanticProperties.POSITION, ExportAccessorVec3(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(deltaVertices, SchemaExtensions.CoordinateSpaceConversionScale)));
 					}
 					else
 					{
@@ -1545,7 +1558,7 @@ namespace UnityGLTF
 					{
 						if (!settings.BlendShapeExportSparseAccessors)
 						{
-							exportTargets.Add(SemanticProperties.NORMAL, ExportAccessor(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(deltaNormals, SchemaExtensions.CoordinateSpaceConversionScale)));
+							exportTargets.Add(SemanticProperties.NORMAL, ExportAccessorVec3(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(deltaNormals, SchemaExtensions.CoordinateSpaceConversionScale)));
 						}
 						else
 						{
@@ -1557,13 +1570,13 @@ namespace UnityGLTF
 					{
 						if (!settings.BlendShapeExportSparseAccessors)
 						{
-							exportTargets.Add(SemanticProperties.TANGENT, ExportAccessor(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(deltaTangents, SchemaExtensions.CoordinateSpaceConversionScale)));
+							exportTargets.Add(SemanticProperties.TANGENT, ExportAccessorVec3(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(deltaTangents, SchemaExtensions.CoordinateSpaceConversionScale)));
 						}
 						else
 						{
 							// 	var baseAccessor = _meshToPrims[meshObj].aTangent;
 							// 	exportTargets.Add(SemanticProperties.TANGENT, ExportSparseAccessor(baseAccessor, SchemaExtensions.ConvertVector4CoordinateSpaceAndCopy(meshObj.tangents, SchemaExtensions.TangentSpaceConversionScale), SchemaExtensions.ConvertVector4CoordinateSpaceAndCopy(deltaVertices, SchemaExtensions.TangentSpaceConversionScale)));
-							exportTargets.Add(SemanticProperties.TANGENT, ExportAccessor(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(deltaTangents, SchemaExtensions.CoordinateSpaceConversionScale)));
+							exportTargets.Add(SemanticProperties.TANGENT, ExportAccessorVec3(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(deltaTangents, SchemaExtensions.CoordinateSpaceConversionScale)));
 							Debug.LogWarning("Blend Shape Tangents for " + meshObj + " won't be exported with sparse accessors – sparse accessor for tangents isn't supported right now.");
 						}
 					}
@@ -1628,11 +1641,10 @@ namespace UnityGLTF
 			material.HasProperty("_LightFactor");
 		}
 
-		private void ExportTextureTransform(TextureInfo def, Material mat, string texName)
+		private void ExportTextureTransform(TextureInfo def, Material mat, MaterialPropertyBlock materialPropertyBlock, string texName)
 		{
 			Vector2 offset = mat.GetTextureOffset(texName);
 			Vector2 scale = mat.GetTextureScale(texName);
-
 			if (offset == Vector2.zero && scale == Vector2.one)
 			{
 				if(mat.HasProperty("_MainTex_ST"))
@@ -1647,6 +1659,24 @@ namespace UnityGLTF
 					scale = Vector2.one;
 				}
 			}
+
+			if (materialPropertyBlock.HasVector(texName + "_ST"))
+			{
+				var scaleAndOffset = materialPropertyBlock.GetVector(texName + "_ST"); // scale and tile
+				scale = new Vector2(scaleAndOffset.x, scaleAndOffset.y);
+				offset = new Vector2(scaleAndOffset.z, scaleAndOffset.w);
+			}
+			else if (materialPropertyBlock.HasVector("_MainTex_ST"))
+			{
+				// difficult choice here: some shaders might support texture transform per-texture, others use the main transform.
+				var scaleAndOffset = materialPropertyBlock.GetVector("_MainTex_ST"); // scale and tile
+				scale = new Vector2(scaleAndOffset.x, scaleAndOffset.y);
+				offset = new Vector2(scaleAndOffset.z, scaleAndOffset.w);
+			}
+
+			// uv coordinate system seems to be flipped in unity
+			if (scale != Vector2.one)
+				offset.y = -(offset.y + scale.y);
 
 			if (_root.ExtensionsUsed == null)
 			{
@@ -1677,7 +1707,7 @@ namespace UnityGLTF
 				def.Extensions = new Dictionary<string, IExtension>();
 
 			def.Extensions[ExtTextureTransformExtensionFactory.EXTENSION_NAME] = new ExtTextureTransformExtension(
-				new GLTF.Math.Vector2(offset.x, -offset.y),
+				new GLTF.Math.Vector2(offset.x, offset.y),
 				0, // TODO: support rotation
 				new GLTF.Math.Vector2(scale.x, scale.y),
 				0 // TODO: support UV channels
@@ -1718,7 +1748,7 @@ namespace UnityGLTF
 			return info;
 		}
 
-		private PbrMetallicRoughness ExportPBRMetallicRoughness(Material material)
+		private PbrMetallicRoughness ExportPBRMetallicRoughness(Material material, MaterialPropertyBlock materialPropertyBlock)
 		{
 			var pbr = new PbrMetallicRoughness() { MetallicFactor = 0, RoughnessFactor = 1.0f };
 			var isGltfPbrMetallicRoughnessShader = material.shader.name.Equals("GLTF/PbrMetallicRoughness", StringComparison.Ordinal);
@@ -1726,11 +1756,11 @@ namespace UnityGLTF
 
 			if (material.HasProperty("_BaseColor"))
 			{
-				pbr.BaseColorFactor = material.GetColor("_BaseColor").ToNumericsColorLinear();
+				pbr.BaseColorFactor = material.GetColor("_BaseColor").ToNumericsColor();
 			}
 			else if (material.HasProperty("_Color"))
 			{
-				pbr.BaseColorFactor = material.GetColor("_Color").ToNumericsColorLinear();
+				pbr.BaseColorFactor = material.GetColor("_Color").ToNumericsColor();
 			}
 
             if (material.HasProperty("_TintColor")) //particles use _TintColor instead of _Color
@@ -1742,7 +1772,7 @@ namespace UnityGLTF
                     white = (c.r + c.g + c.b) / 3.0f; //multiply alpha by overall whiteness of TintColor
                 }
 
-                pbr.BaseColorFactor = (material.GetColor("_TintColor") * white).ToNumericsColorLinear() ;
+                pbr.BaseColorFactor = (material.GetColor("_TintColor") * white).ToNumericsColor() ;
             }
 
             if (material.HasProperty("_MainTex") || material.HasProperty("_BaseMap")) //TODO if additive particle, render black into alpha
@@ -1756,7 +1786,7 @@ namespace UnityGLTF
 					if(mainTex is Texture2D)
 					{
 						pbr.BaseColorTexture = ExportTextureInfo(mainTex, TextureMapType.Main);
-						ExportTextureTransform(pbr.BaseColorTexture, material, mainTexPropertyName);
+						ExportTextureTransform(pbr.BaseColorTexture, material, materialPropertyBlock, mainTexPropertyName);
 					}
 					else
 					{
@@ -1784,7 +1814,9 @@ namespace UnityGLTF
 				// legacy workaround: the UnityGLTF shaders misuse "_Glossiness" as roughness but don't have a keyword for it.
 				if (isGltfPbrMetallicRoughnessShader)
 					smoothness = 1 - smoothness;
-				pbr.RoughnessFactor = (metallicGlossMap && material.HasProperty("_GlossMapScale")) ? material.GetFloat("_GlossMapScale") : 1.0 - smoothness;
+				var roughnessFactor = (metallicGlossMap && material.HasProperty("_GlossMapScale")) ? material.GetFloat("_GlossMapScale") : 1.0f - smoothness;
+				roughnessFactor = Mathf.Clamp01(roughnessFactor);
+				pbr.RoughnessFactor = roughnessFactor;
 			}
 
 			if (material.HasProperty("_MetallicGlossMap"))
@@ -1800,7 +1832,7 @@ namespace UnityGLTF
 						// that's not true for the gltf shaders though, so we keep the value there.
 						if (ignoreMetallicFactor)
 							pbr.MetallicFactor = 1.0f;
-						ExportTextureTransform(pbr.MetallicRoughnessTexture, material, "_MetallicGlossMap");
+						ExportTextureTransform(pbr.MetallicRoughnessTexture, material, materialPropertyBlock, "_MetallicGlossMap");
 					}
 					else
 					{
@@ -1812,8 +1844,8 @@ namespace UnityGLTF
 			return pbr;
 		}
 
-		private void ExportUnlit(GLTFMaterial def, Material material){
-
+		private void ExportUnlit(GLTFMaterial def, Material material, MaterialPropertyBlock materialPropertyBlock)
+		{
 			const string extname = KHR_MaterialsUnlitExtensionFactory.EXTENSION_NAME;
 			DeclareExtensionUsage( extname, true );
 			def.AddExtension( extname, new KHR_MaterialsUnlitExtension());
@@ -1822,7 +1854,7 @@ namespace UnityGLTF
 
 			if (material.HasProperty("_Color"))
 			{
-				pbr.BaseColorFactor = material.GetColor("_Color").ToNumericsColorLinear();
+				pbr.BaseColorFactor = material.GetColor("_Color").ToNumericsColor();
 			}
 
 			if (material.HasProperty("_MainTex"))
@@ -1833,7 +1865,7 @@ namespace UnityGLTF
 					if(mainTex is Texture2D)
 					{
 						pbr.BaseColorTexture = ExportTextureInfo(mainTex, TextureMapType.Main);
-						ExportTextureTransform(pbr.BaseColorTexture, material, "_MainTex");
+						ExportTextureTransform(pbr.BaseColorTexture, material, materialPropertyBlock, "_MainTex");
 					}
 					else
 					{
@@ -1847,7 +1879,7 @@ namespace UnityGLTF
 		}
 
 
-		private void ExportPBRSpecularGlossiness(GLTFMaterial material, Material materialObj)
+		private void ExportPBRSpecularGlossiness(GLTFMaterial material, Material materialObj, MaterialPropertyBlock materialPropertyBlock)
 		{
 			if (_root.ExtensionsUsed == null)
 			{
@@ -1883,7 +1915,7 @@ namespace UnityGLTF
 
 			if (materialObj.HasProperty("_Color"))
 			{
-				diffuseFactor = materialObj.GetColor("_Color").ToNumericsColorLinear();
+				diffuseFactor = materialObj.GetColor("_Color").ToNumericsColor();
 			}
 
 			if (materialObj.HasProperty("_MainTex"))
@@ -1895,7 +1927,7 @@ namespace UnityGLTF
 					if (mainTex is Texture2D)
 					{
 						diffuseTexture = ExportTextureInfo(mainTex, TextureMapType.Main);
-						ExportTextureTransform(diffuseTexture, materialObj, "_MainTex");
+						ExportTextureTransform(diffuseTexture, materialObj, materialPropertyBlock, "_MainTex");
 					}
 					else
 					{
@@ -1909,7 +1941,7 @@ namespace UnityGLTF
 				var specGlossMap = materialObj.GetTexture("_SpecGlossMap");
 				if (specGlossMap == null)
 				{
-					var specColor = materialObj.GetColor("_SpecColor").ToNumericsColorLinear();
+					var specColor = materialObj.GetColor("_SpecColor").ToNumericsColor();
 					specularFactor = new GLTF.Math.Vector3(specColor.R, specColor.G, specColor.B);
 				}
 			}
@@ -1932,7 +1964,7 @@ namespace UnityGLTF
 					if (mgTex is Texture2D)
 					{
 						specularGlossinessTexture = ExportTextureInfo(mgTex, TextureMapType.SpecGloss);
-						ExportTextureTransform(specularGlossinessTexture, materialObj, "_SpecGlossMap");
+						ExportTextureTransform(specularGlossinessTexture, materialObj, materialPropertyBlock, "_SpecGlossMap");
 					}
 					else
 					{
@@ -1950,7 +1982,7 @@ namespace UnityGLTF
 			);
 		}
 
-		private MaterialCommonConstant ExportCommonConstant(Material materialObj)
+		private MaterialCommonConstant ExportCommonConstant(Material materialObj, MaterialPropertyBlock materialPropertyBlock)
 		{
 			if (_root.ExtensionsUsed == null)
 			{
@@ -1977,7 +2009,7 @@ namespace UnityGLTF
 
 			if (materialObj.HasProperty("_AmbientFactor"))
 			{
-				constant.AmbientFactor = materialObj.GetColor("_AmbientFactor").ToNumericsColorRaw();
+				constant.AmbientFactor = materialObj.GetColor("_AmbientFactor").ToNumericsColor();
 			}
 
 			if (materialObj.HasProperty("_LightMap"))
@@ -1987,14 +2019,14 @@ namespace UnityGLTF
 				if (lmTex != null)
 				{
 					constant.LightmapTexture = ExportTextureInfo(lmTex, TextureMapType.Light);
-					ExportTextureTransform(constant.LightmapTexture, materialObj, "_LightMap");
+					ExportTextureTransform(constant.LightmapTexture, materialObj, materialPropertyBlock, "_LightMap");
 				}
 
 			}
 
 			if (materialObj.HasProperty("_LightFactor"))
 			{
-				constant.LightmapFactor = materialObj.GetColor("_LightFactor").ToNumericsColorRaw();
+				constant.LightmapFactor = materialObj.GetColor("_LightFactor").ToNumericsColor();
 			}
 
 			return constant;
@@ -2025,6 +2057,7 @@ namespace UnityGLTF
 				textureObj.name = (_root.Textures.Count + 1).ToString();
 			}
 
+			SetUniqueTextureName(textureObj);
 			if (ExportNames)
 			{
 				texture.Name = textureObj.name;
@@ -2056,9 +2089,10 @@ namespace UnityGLTF
 		private string GetImageOutputPath(Texture texture)
 		{
 			var imagePath = _exportOptions.TexturePathRetriever(texture);
+			var textureName = GetTextureName(texture);
 			if (string.IsNullOrEmpty(imagePath))
 			{
-				imagePath = texture.name;
+				imagePath = textureName;
 			}
 
 			var filenamePath = imagePath;
@@ -2076,7 +2110,7 @@ namespace UnityGLTF
 				filenamePath = Path.GetFileName(filenamePath);
 				if (!isGltfCompatible)
 				{
-					filenamePath = Path.ChangeExtension(texture.name, ".png");
+					filenamePath = Path.ChangeExtension(textureName, ".png");
 				}
 			}
 
@@ -2092,7 +2126,6 @@ namespace UnityGLTF
 			}
 
 			var image = new GLTFImage();
-
 			if (ExportNames)
 			{
 				image.Name = texture.name;
@@ -2101,23 +2134,23 @@ namespace UnityGLTF
             if (texture.GetType() == typeof(RenderTexture))
             {
                 Texture2D tempTexture = new Texture2D(texture.width, texture.height);
-                tempTexture.name = texture.name;
 
                 RenderTexture.active = texture as RenderTexture;
                 tempTexture.ReadPixels(new Rect(0, 0, texture.width, texture.height), 0, 0);
                 tempTexture.Apply();
+				tempTexture.name = texture.name;
                 texture = tempTexture;
             }
 #if UNITY_2017_1_OR_NEWER
             if (texture.GetType() == typeof(CustomRenderTexture))
             {
                 Texture2D tempTexture = new Texture2D(texture.width, texture.height);
-                tempTexture.name = texture.name;
 
                 RenderTexture.active = texture as CustomRenderTexture;
                 tempTexture.ReadPixels(new Rect(0, 0, texture.width, texture.height), 0, 0);
                 tempTexture.Apply();
-                texture = tempTexture;
+				tempTexture.name = texture.name;
+				texture = tempTexture;
             }
 #endif
 
@@ -2140,6 +2173,57 @@ namespace UnityGLTF
 			_root.Images.Add(image);
 
 			return id;
+		}
+
+		private string GetTextureName(Texture texture)
+		{
+			var name = texture.name;
+			name = name.Replace('.', '_');
+			return name;
+		}
+
+		private void SetUniqueTextureName(Texture texture)
+		{
+			var name = texture.name;
+			var textureHash = texture.GetInstanceID();
+			if (texture is Texture2D tex2D)
+				textureHash = CreateHashValue(tex2D);
+			name = name.Replace('.', '_');
+			var uniqueName = name;
+			var number = 0;
+			var isUniqueTexture = !_textureHashes.ContainsKey(textureHash);
+			while (isUniqueTexture && _textureHashes.ContainsValue(uniqueName) && number++ < 1000)
+				uniqueName = name + number.ToString();
+
+			if (isUniqueTexture)
+				_textureHashes.Add(textureHash, uniqueName);
+			else
+				uniqueName = _textureHashes[textureHash];
+			texture.name = uniqueName;
+		}
+
+		/// <summary>
+		/// Creates a hashcode from a number of samples of a texture
+		/// </summary>
+		/// <param name="tex"></param>
+		/// <returns></returns>
+		private int CreateHashValue(Texture2D tex)
+		{
+			var hash = CombineHashCodes(tex.width, tex.height);
+			var pixels = tex.GetPixels32();
+			var numberOfSamples = Mathf.Min(59, pixels.Length);
+			var pixelStep = pixels.Length / numberOfSamples;
+			for (int i = 0; i < numberOfSamples; i++)
+			{
+				var c = pixels[pixelStep * i];
+				hash += CombineHashCodes(c.r + c.g, c.b + c.a);
+			}
+			return hash;
+		}
+
+		internal static int CombineHashCodes(int h1, int h2)
+		{
+			return ((h1 << 5) + h1) ^ h2;
 		}
 
 		bool TryGetTextureDataFromDisk(TextureMapType textureMapType, Texture texture, out string path, out byte[] data)
@@ -2400,22 +2484,8 @@ namespace UnityGLTF
 			accessor.Count = count;
 			accessor.Type = GLTFAccessorAttributeType.SCALAR;
 
-			int min = arr[0];
-			int max = arr[0];
-
-			for (var i = 1; i < count; i++)
-			{
-				var cur = arr[i];
-
-				if (cur < min)
-				{
-					min = cur;
-				}
-				if (cur > max)
-				{
-					max = cur;
-				}
-			}
+			int min = arr.Min(v => v);
+			int max = arr.Max(v => v);
 
 			AlignToBoundary(_bufferWriter.BaseStream, 0x00);
 			uint byteOffset = CalculateAlignment((uint)_bufferWriter.BaseStream.Position, 4);
@@ -2498,7 +2568,7 @@ namespace UnityGLTF
 			return id;
 		}
 
-		private AccessorId ExportAccessor(Vector2[] arr)
+		private AccessorId ExportAccessorVec2(Vector2[] arr)
 		{
 			uint count = (uint)arr.Length;
 
@@ -2512,32 +2582,10 @@ namespace UnityGLTF
 			accessor.Count = count;
 			accessor.Type = GLTFAccessorAttributeType.VEC2;
 
-			float minX = arr[0].x;
-			float minY = arr[0].y;
-			float maxX = arr[0].x;
-			float maxY = arr[0].y;
-
-			for (var i = 1; i < count; i++)
-			{
-				var cur = arr[i];
-
-				if (cur.x < minX)
-				{
-					minX = cur.x;
-				}
-				if (cur.y < minY)
-				{
-					minY = cur.y;
-				}
-				if (cur.x > maxX)
-				{
-					maxX = cur.x;
-				}
-				if (cur.y > maxY)
-				{
-					maxY = cur.y;
-				}
-			}
+			float minX = arr.Min(v => v.x);
+			float minY = arr.Min(v => v.y);
+			float maxX = arr.Max(v => v.x);
+			float maxY = arr.Max(v => v.y);
 
 			accessor.Min = new List<double> { minX, minY };
 			accessor.Max = new List<double> { maxX, maxY };
@@ -2565,7 +2613,7 @@ namespace UnityGLTF
 			return id;
 		}
 
-		private AccessorId ExportAccessor(Vector3[] arr)
+		private AccessorId ExportAccessorVec3(Vector3[] arr)
 		{
 			uint count = (uint)arr.Length;
 
@@ -2579,42 +2627,12 @@ namespace UnityGLTF
 			accessor.Count = count;
 			accessor.Type = GLTFAccessorAttributeType.VEC3;
 
-			float minX = arr[0].x;
-			float minY = arr[0].y;
-			float minZ = arr[0].z;
-			float maxX = arr[0].x;
-			float maxY = arr[0].y;
-			float maxZ = arr[0].z;
-
-			for (var i = 1; i < count; i++)
-			{
-				var cur = arr[i];
-
-				if (cur.x < minX)
-				{
-					minX = cur.x;
-				}
-				if (cur.y < minY)
-				{
-					minY = cur.y;
-				}
-				if (cur.z < minZ)
-				{
-					minZ = cur.z;
-				}
-				if (cur.x > maxX)
-				{
-					maxX = cur.x;
-				}
-				if (cur.y > maxY)
-				{
-					maxY = cur.y;
-				}
-				if (cur.z > maxZ)
-				{
-					maxZ = cur.z;
-				}
-			}
+			float minX = arr.Min(v => v.x);
+			float minY = arr.Min(v => v.y);
+			float minZ = arr.Min(v => v.z);
+			float maxX = arr.Max(v => v.x);
+			float maxY = arr.Max(v => v.y);
+			float maxZ = arr.Max(v => v.z);
 
 			accessor.Min = new List<double> { minX, minY, minZ };
 			accessor.Max = new List<double> { maxX, maxY, maxZ };
@@ -2704,43 +2722,14 @@ namespace UnityGLTF
 			// we need to calculate the min/max of the entire new data array
 			uint count = (uint) arr.Length;
 
-			var firstElement = baseData != null ? (baseData[0] + arr[0]) : arr[0];
-			float minX = firstElement.x;
-			float minY = firstElement.y;
-			float minZ = firstElement.z;
-			float maxX = firstElement.x;
-			float maxY = firstElement.y;
-			float maxZ = firstElement.z;
+			var arrZippedWithBase = baseData != null ? arr.Zip(baseData, (v, b) => b + v) : arr;
 
-			for (var i = 1; i < count; i++)
-			{
-				var cur = baseData != null ? (baseData[i] + arr[i]) : arr[i];
-
-				if (cur.x < minX)
-				{
-					minX = cur.x;
-				}
-				if (cur.y < minY)
-				{
-					minY = cur.y;
-				}
-				if (cur.z < minZ)
-				{
-					minZ = cur.z;
-				}
-				if (cur.x > maxX)
-				{
-					maxX = cur.x;
-				}
-				if (cur.y > maxY)
-				{
-					maxY = cur.y;
-				}
-				if (cur.z > maxZ)
-				{
-					maxZ = cur.z;
-				}
-			}
+			float minX = arrZippedWithBase.Min(v => v.x);
+			float minY = arrZippedWithBase.Min(v => v.y);
+			float minZ = arrZippedWithBase.Min(v => v.z);
+			float maxX = arrZippedWithBase.Max(v => v.x);
+			float maxY = arrZippedWithBase.Max(v => v.y);
+			float maxZ = arrZippedWithBase.Max(v => v.z);
 
 			accessor.Min = new List<double> { minX, minY, minZ };
 			accessor.Max = new List<double> { maxX, maxY, maxZ };
@@ -2792,7 +2781,7 @@ namespace UnityGLTF
 			return id;
 		}
 
-		private AccessorId ExportAccessor(Vector4[] arr)
+		private AccessorId ExportAccessorVec4(Vector4[] arr)
 		{
 			uint count = (uint)arr.Length;
 
@@ -2806,52 +2795,14 @@ namespace UnityGLTF
 			accessor.Count = count;
 			accessor.Type = GLTFAccessorAttributeType.VEC4;
 
-			float minX = arr[0].x;
-			float minY = arr[0].y;
-			float minZ = arr[0].z;
-			float minW = arr[0].w;
-			float maxX = arr[0].x;
-			float maxY = arr[0].y;
-			float maxZ = arr[0].z;
-			float maxW = arr[0].w;
-
-			for (var i = 1; i < count; i++)
-			{
-				var cur = arr[i];
-
-				if (cur.x < minX)
-				{
-					minX = cur.x;
-				}
-				if (cur.y < minY)
-				{
-					minY = cur.y;
-				}
-				if (cur.z < minZ)
-				{
-					minZ = cur.z;
-				}
-				if (cur.w < minW)
-				{
-					minW = cur.w;
-				}
-				if (cur.x > maxX)
-				{
-					maxX = cur.x;
-				}
-				if (cur.y > maxY)
-				{
-					maxY = cur.y;
-				}
-				if (cur.z > maxZ)
-				{
-					maxZ = cur.z;
-				}
-				if (cur.w > maxW)
-				{
-					maxW = cur.w;
-				}
-			}
+			float minX = arr.Min(v => v.x);
+			float minY = arr.Min(v => v.y);
+			float minZ = arr.Min(v => v.z);
+			float minW = arr.Min(v => v.w);
+			float maxX = arr.Max(v => v.x);
+			float maxY = arr.Max(v => v.y);
+			float maxZ = arr.Max(v => v.z);
+			float maxW = arr.Max(v => v.w);
 
 			accessor.Min = new List<double> { minX, minY, minZ, minW };
 			accessor.Max = new List<double> { maxX, maxY, maxZ, maxW };
@@ -2881,7 +2832,7 @@ namespace UnityGLTF
 			return id;
 		}
 
-		private AccessorId ExportAccessor(Color[] arr)
+		private AccessorId ExportAccessorColor(Color[] arr)
 		{
 			uint count = (uint)arr.Length;
 
@@ -2895,52 +2846,15 @@ namespace UnityGLTF
 			accessor.Count = count;
 			accessor.Type = GLTFAccessorAttributeType.VEC4;
 
-			float minR = arr[0].r;
-			float minG = arr[0].g;
-			float minB = arr[0].b;
-			float minA = arr[0].a;
-			float maxR = arr[0].r;
-			float maxG = arr[0].g;
-			float maxB = arr[0].b;
-			float maxA = arr[0].a;
 
-			for (var i = 1; i < count; i++)
-			{
-				var cur = arr[i];
-
-				if (cur.r < minR)
-				{
-					minR = cur.r;
-				}
-				if (cur.g < minG)
-				{
-					minG = cur.g;
-				}
-				if (cur.b < minB)
-				{
-					minB = cur.b;
-				}
-				if (cur.a < minA)
-				{
-					minA = cur.a;
-				}
-				if (cur.r > maxR)
-				{
-					maxR = cur.r;
-				}
-				if (cur.g > maxG)
-				{
-					maxG = cur.g;
-				}
-				if (cur.b > maxB)
-				{
-					maxB = cur.b;
-				}
-				if (cur.a > maxA)
-				{
-					maxA = cur.a;
-				}
-			}
+			float minR = arr.Min(c => c.r);
+			float minG = arr.Min(c => c.g);
+			float minB = arr.Min(c => c.b);
+			float minA = arr.Min(c => c.a);
+			float maxR = arr.Max(c => c.r);
+			float maxG = arr.Max(c => c.g);
+			float maxB = arr.Max(c => c.b);
+			float maxA = arr.Max(c => c.a);
 
 			accessor.Min = new List<double> { minR, minG, minB, minA };
 			accessor.Max = new List<double> { maxR, maxG, maxB, maxA };
@@ -3278,7 +3192,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 
 					if(haveAnimation)
 					{
-						AccessorId timeAccessor = ExportAccessor(times);
+						AccessorId timeAccessor = ExportAccessorFloat(times);
 
 						// Translation
 						if(positions != null)
@@ -3296,7 +3210,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 
 							AnimationSampler Tsampler = new AnimationSampler();
 							Tsampler.Input = timeAccessor;
-							Tsampler.Output = ExportAccessor(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(positions, SchemaExtensions.CoordinateSpaceConversionScale));
+							Tsampler.Output = ExportAccessorVec3(SchemaExtensions.ConvertVector3CoordinateSpaceAndCopy(positions, SchemaExtensions.CoordinateSpaceConversionScale));
 							Tchannel.Sampler = new AnimationSamplerId
 							{
 								Id = animation.Samplers.Count,
@@ -3324,7 +3238,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 
 							AnimationSampler Rsampler = new AnimationSampler();
 							Rsampler.Input = timeAccessor; // Float, for time
-							Rsampler.Output = ExportAccessor(rotations, true); // Vec4 for
+							Rsampler.Output = ExportAccessorVec4(rotations, true); // Vec4 for
 							Rchannel.Sampler = new AnimationSamplerId
 							{
 								Id = animation.Samplers.Count,
@@ -3352,7 +3266,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 
 							AnimationSampler Ssampler = new AnimationSampler();
 							Ssampler.Input = timeAccessor; // Float, for time
-							Ssampler.Output = ExportAccessor(scales); // Vec3 for scale
+							Ssampler.Output = ExportAccessorVec3(scales); // Vec3 for scale
 							Schannel.Sampler = new AnimationSamplerId
 							{
 								Id = animation.Samplers.Count,
@@ -3379,7 +3293,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 
 							AnimationSampler Wsampler = new AnimationSampler();
 							Wsampler.Input = timeAccessor;
-							Wsampler.Output = ExportAccessor(weights);
+							Wsampler.Output = ExportAccessorFloat(weights);
 							Wchannel.Sampler = new AnimationSamplerId()
 							{
 								Id = animation.Samplers.Count,
@@ -3795,7 +3709,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 					});
 			}
 
-			gltfSkin.InverseBindMatrices = ExportAccessor(mesh.bindposes);
+			gltfSkin.InverseBindMatrices = ExportAccessorMatrix(mesh.bindposes);
 
 			Vector4[] bones = boneWeightToBoneVec4(mesh.boneWeights);
 			Vector4[] weights = boneWeightToWeightVec4(mesh.boneWeights);
@@ -3806,7 +3720,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 				if (!prim.Attributes.ContainsKey("JOINTS_0"))
 					prim.Attributes.Add("JOINTS_0", ExportAccessorUint(bones));
 				if (!prim.Attributes.ContainsKey("WEIGHTS_0"))
-					prim.Attributes.Add("WEIGHTS_0", ExportAccessor(weights));
+					prim.Attributes.Add("WEIGHTS_0", ExportAccessorVec4(weights));
 			}
 
 			_root.Nodes[_exportedTransforms[transform.GetInstanceID()]].Skin = new SkinId() { Id = _root.Skins.Count, Root = _root };
@@ -3849,52 +3763,14 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 			accessor.Count = count;
 			accessor.Type = GLTFAccessorAttributeType.VEC4;
 
-			float minX = arr[0].x;
-			float minY = arr[0].y;
-			float minZ = arr[0].z;
-			float minW = arr[0].w;
-			float maxX = arr[0].x;
-			float maxY = arr[0].y;
-			float maxZ = arr[0].z;
-			float maxW = arr[0].w;
-
-			for (var i = 1; i < count; i++)
-			{
-				var cur = arr[i];
-
-				if (cur.x < minX)
-				{
-					minX = cur.x;
-				}
-				if (cur.y < minY)
-				{
-					minY = cur.y;
-				}
-				if (cur.z < minZ)
-				{
-					minZ = cur.z;
-				}
-				if (cur.w < minW)
-				{
-					minW = cur.w;
-				}
-				if (cur.x > maxX)
-				{
-					maxX = cur.x;
-				}
-				if (cur.y > maxY)
-				{
-					maxY = cur.y;
-				}
-				if (cur.z > maxZ)
-				{
-					maxZ = cur.z;
-				}
-				if (cur.w > maxW)
-				{
-					maxW = cur.w;
-				}
-			}
+			float minX = arr.Min(v => v.x);
+			float minY = arr.Min(v => v.y);
+			float minZ = arr.Min(v => v.z);
+			float minW = arr.Min(v => v.w);
+			float maxX = arr.Max(v => v.x);
+			float maxY = arr.Max(v => v.y);
+			float maxZ = arr.Max(v => v.z);
+			float maxW = arr.Max(v => v.w);
 
 			accessor.Min = new List<double> { minX, minY, minZ, minW };
 			accessor.Max = new List<double> { maxX, maxY, maxZ, maxW };
@@ -3925,7 +3801,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 		}
 
 		// This is used for Quaternions / Rotations
-		private AccessorId ExportAccessor(Vector4[] arr, bool switchHandedness = false)
+		private AccessorId ExportAccessorVec4(Vector4[] arr, bool switchHandedness = false)
 		{
 			var count = (uint)arr.Length;
 
@@ -3939,57 +3815,17 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 			accessor.Count = count;
 			accessor.Type = GLTFAccessorAttributeType.VEC4;
 
-			var a0 = arr[0];
-			a0 = switchHandedness ? a0.switchHandedness() : a0;
-			a0 = a0.normalized;
-			float minX = a0.x;
-			float minY = a0.y;
-			float minZ = a0.z;
-			float minW = a0.w;
-			float maxX = a0.x;
-			float maxY = a0.y;
-			float maxZ = a0.z;
-			float maxW = a0.w;
+			var arrSwitched = switchHandedness ? arr.Select(v => v.switchHandedness()) : arr;
+			arrSwitched = arrSwitched.Select(x => x.normalized);
 
-			for (var i = 1; i < count; i++)
-			{
-				var cur = arr[i];
-				cur = switchHandedness ? cur.switchHandedness() : cur;
-				cur = cur.normalized;
-
-				if (cur.x < minX)
-				{
-					minX = cur.x;
-				}
-				if (cur.y < minY)
-				{
-					minY = cur.y;
-				}
-				if (cur.z < minZ)
-				{
-					minZ = cur.z;
-				}
-				if (cur.w < minW)
-				{
-					minW = cur.w;
-				}
-				if (cur.x > maxX)
-				{
-					maxX = cur.x;
-				}
-				if (cur.y > maxY)
-				{
-					maxY = cur.y;
-				}
-				if (cur.z > maxZ)
-				{
-					maxZ = cur.z;
-				}
-				if (cur.w > maxW)
-				{
-					maxW = cur.w;
-				}
-			}
+			float minX = arrSwitched.Min(v => v.x);
+			float minY = arrSwitched.Min(v => v.y);
+			float minZ = arrSwitched.Min(v => v.z);
+			float minW = arrSwitched.Min(v => v.w);
+			float maxX = arrSwitched.Max(v => v.x);
+			float maxY = arrSwitched.Max(v => v.y);
+			float maxZ = arrSwitched.Max(v => v.z);
+			float maxW = arrSwitched.Max(v => v.w);
 
 			accessor.Min = new List<double> { minX, minY, minZ, minW };
 			accessor.Max = new List<double> { maxX, maxY, maxZ, maxW };
@@ -3997,14 +3833,12 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 			AlignToBoundary(_bufferWriter.BaseStream, 0x00);
 			uint byteOffset = CalculateAlignment((uint)_bufferWriter.BaseStream.Position, 4);
 
-			foreach (var vec in arr)
+			foreach (var vec in arrSwitched)
 			{
-				Vector4 vect = switchHandedness ? vec.switchHandedness() : vec;
-				vect = vect.normalized;
-				_bufferWriter.Write(vect.x);
-				_bufferWriter.Write(vect.y);
-				_bufferWriter.Write(vect.z);
-				_bufferWriter.Write(vect.w);
+				_bufferWriter.Write(vec.x);
+				_bufferWriter.Write(vec.y);
+				_bufferWriter.Write(vec.z);
+				_bufferWriter.Write(vec.w);
 			}
 
 			uint byteLength = CalculateAlignment((uint)_bufferWriter.BaseStream.Position - byteOffset, 4);
@@ -4021,7 +3855,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 			return id;
 		}
 
-		private AccessorId ExportAccessor(float[] arr)
+		private AccessorId ExportAccessorFloat(float[] arr)
 		{
 			var count = (uint)arr.Length;
 
@@ -4035,22 +3869,8 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 			accessor.Count = count;
 			accessor.Type = GLTFAccessorAttributeType.SCALAR;
 
-			float min = arr[0];
-			float max = arr[0];
-
-			for (var i = 1; i < count; i++)
-			{
-				var cur = arr[i];
-
-				if (cur < min)
-				{
-					min = cur;
-				}
-				if (cur > max)
-				{
-					max = cur;
-				}
-			}
+			float min = arr.Min(v => v);
+			float max = arr.Max(v => v);
 
 			accessor.Min = new List<double> { min };
 			accessor.Max = new List<double> { max };
@@ -4078,7 +3898,7 @@ Debug.Log("animator: " + animator + "=> " + animatorController);
 			return id;
 		}
 
-		private AccessorId ExportAccessor(Matrix4x4[] arr)
+		private AccessorId ExportAccessorMatrix(Matrix4x4[] arr)
 		{
 			var count = (uint)arr.Length;
 
