@@ -1208,6 +1208,18 @@ namespace UnityGLTF
 				return null;
 			}
 
+#if UNITY_EDITOR
+			if (!meshObj.isReadable)
+			{
+				var path = AssetDatabase.GetAssetPath(meshObj);
+				var importer = AssetImporter.GetAtPath(path) as ModelImporter;
+				if (importer)
+				{
+					importer.isReadable = true;
+					importer.SaveAndReimport();
+				}
+			}
+#endif
 			var renderer = gameObject.GetComponent<MeshRenderer>();
 			if (!renderer) smr = gameObject.GetComponent<SkinnedMeshRenderer>();
 
