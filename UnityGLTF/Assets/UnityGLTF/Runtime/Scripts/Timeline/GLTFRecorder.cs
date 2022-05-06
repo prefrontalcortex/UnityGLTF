@@ -329,6 +329,22 @@ namespace UnityGLTF.Timeline
 
 			CollectAndProcessAnimation(exporter, anim);
 
+			// TODO: export as KHR_audio embedded in the GLB file
+			/*
+			exporter.DeclareExtensionUsage("KHR_audio", false);
+			var binaryData = new byte[1];
+			var bufferViewId = exporter.ExportInternalBuffer(binaryData);
+			var image = new GLTFImage();
+			image.BufferView = bufferViewId;
+			exporter.extensions
+			var id = new ImageId
+			{
+				Id = _root.Images.Count,
+				Root = _root
+			};
+			_root.Images.Add(image);
+			*/
+
 			if (anim.Channels.Count > 0 && anim.Samplers.Count > 0)
 				gltfRoot.Animations.Add(anim);
 		}

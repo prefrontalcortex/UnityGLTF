@@ -2531,6 +2531,17 @@ namespace UnityGLTF
 		}
 #endif
 
+		public BufferViewId ExportInternalBuffer(byte[] data)
+		{
+			AlignToBoundary(_bufferWriter.BaseStream, 0x00);
+			uint byteOffset = CalculateAlignment((uint)_bufferWriter.BaseStream.Position, 4);
+			_bufferWriter.Write(data);
+			uint byteLength = CalculateAlignment((uint)_bufferWriter.BaseStream.Position - byteOffset, 4);
+			var bufferView = ExportBufferView((uint)byteOffset, (uint)byteLength);
+
+			return bufferView;
+		}
+
 		private ImageId ExportImageInternalBuffer(UnityEngine.Texture texture, TextureMapType textureMapType)
 		{
 			const string PNGMimeType = "image/png";
