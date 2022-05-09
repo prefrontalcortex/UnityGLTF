@@ -2634,6 +2634,26 @@ namespace UnityGLTF
 				}
 			}
 
+			if (Application.isBatchMode)
+			{
+				if (!texture.isReadable)
+				{
+					Debug.LogWarning($"Can't export texture {texture} because it's not readable. Headless builds require readable textures.", texture);
+					return null;
+				}
+				if (!(texture is Texture2D texture2D))
+				{
+					Debug.LogWarning($"Can't export texture {texture} because it's not a Texture2D. Headless builds require readable textures.", texture);
+					return null;
+				}
+
+				Debug.Log("Pixels: " + string.Join(", ", texture2D.GetPixels()));
+				image.MimeType = PNGMimeType;
+				_bufferWriter.Write(texture2D.EncodeToPNG());
+				Debug.Log("Wrote texture to disk");
+				wasAbleToExportFromDisk = true;
+			}
+
 			if (!wasAbleToExportFromDisk)
 		    {
 				var sRGB = true;
