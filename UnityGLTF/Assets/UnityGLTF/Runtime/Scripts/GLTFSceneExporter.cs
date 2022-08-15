@@ -14,6 +14,8 @@ using System.Text.RegularExpressions;
 using GLTF.Schema;
 using Unity.Profiling;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEditor;
 using UnityGLTF.Extensions;
 using WrapMode = GLTF.Schema.WrapMode;
 
@@ -28,7 +30,7 @@ namespace UnityGLTF
 		internal readonly GLTFSettings settings;
 
 		public ExportOptions() : this(GLTFSettings.GetOrCreateSettings()) { }
-		
+
 		public ExportOptions(GLTFSettings settings)
 		{
 			if (!settings) settings = GLTFSettings.GetOrCreateSettings();
@@ -116,10 +118,11 @@ namespace UnityGLTF
 		private const int GLTFHeaderSize = 12;
 		private const int SectionHeaderSize = 8;
 
-		protected struct PrimKey
+		public struct PrimKey
 		{
 			public bool Equals(PrimKey other)
 			{
+				if (!Equals(SMR, other.SMR)) return false;
 				if (!Equals(Mesh, other.Mesh)) return false;
 				if (Materials == null && other.Materials == null) return true;
 				if (!(Materials != null && other.Materials != null)) return false;
@@ -152,6 +155,8 @@ namespace UnityGLTF
 					return code;
 				}
 			}
+
+			public SkinnedMeshRenderer SMR;
 
 			public Mesh Mesh;
 			public Material[] Materials;
@@ -704,8 +709,96 @@ namespace UnityGLTF
 			FilterPrimitives(nodeTransform, out primitives, out nonPrimitives);
 			if (primitives.Length > 0)
 			{
-				node.Mesh = ExportMesh(nodeTransform.name, primitives);
-				RegisterPrimitivesWithNode(node, primitives);
+				var primKeys = new List<PrimKey>();
+
+				foreach (var prim in primitives)
+				{
+					Mesh meshObj = null;
+					SkinnedMeshRenderer smr = null;
+					var filter = prim.GetComponent<MeshFilter>();
+					if (filter)
+					{
+						meshObj = filter.sharedMesh;
+					}
+					else
+					{
+						smr = prim.GetComponent<SkinnedMeshRenderer>();
+						if (smr)
+						{
+							meshObj = smr.sharedMesh;
+						}
+					}
+
+					if (!meshObj)
+					{
+						Debug.LogWarning($"MeshFilter.sharedMesh on GameObject:{prim.name} is missing, skipping", prim);
+						exportPrimitiveMarker.End();
+						return null;
+					}
+
+
+#if UNITY_EDITOR
+					if (!MeshIsReadable(meshObj) && EditorUtility.IsPersistent(meshObj))
+					{
+#if UNITY_2019_3_OR_NEWER
+						var assetPath = AssetDatabase.GetAssetPath(meshObj);
+						if(assetPath?.Length > 30) assetPath = "..." + assetPath.Substring(assetPath.Length - 30);
+						if(EditorUtility.DisplayDialog("Exporting mesh but mesh is not readable",
+								$"The mesh {meshObj.name} is not readable. Do you want to change its import settings and make it readable now?\n\n" + assetPath,
+								"Make it readable", "No, skip mesh",
+								DialogOptOutDecisionType.ForThisSession, MakeMeshReadableDialogueDecisionKey))
+#endif
+						{
+							var path = AssetDatabase.GetAssetPath(meshObj);
+							var importer = AssetImporter.GetAtPath(path) as ModelImporter;
+							if (importer)
+							{
+								importer.isReadable = true;
+								importer.SaveAndReimport();
+							}
+						}
+#if UNITY_2019_3_OR_NEWER
+						else
+						{
+							Debug.LogWarning($"The mesh {meshObj.name} is not readable. Skipping", null);
+							exportPrimitiveMarker.End();
+							return null;
+						}
+#endif
+					}
+#endif
+
+					if (Application.isPlaying && !MeshIsReadable(meshObj))
+					{
+						Debug.LogWarning($"The mesh {meshObj.name} is not readable. Skipping", null);
+						exportPrimitiveMarker.End();
+						return null;
+					}
+
+					var renderer = prim.GetComponent<MeshRenderer>();
+					if (!renderer) smr = prim.GetComponent<SkinnedMeshRenderer>();
+
+					if(!renderer && !smr)
+					{
+						Debug.LogWarning("GameObject does have neither renderer nor SkinnedMeshRenderer! " + prim.name, prim);
+						exportPrimitiveMarker.End();
+						return null;
+					}
+
+					var materialsObj = renderer ? renderer.sharedMaterials : smr.sharedMaterials;
+
+
+					var primKey = new PrimKey();
+					primKey.Mesh = meshObj;
+					primKey.Materials = materialsObj;
+					primKey.SMR = smr;
+
+					primKeys.Add(primKey);
+
+				}
+
+				node.Mesh = ExportMesh(nodeTransform.name, primKeys.ToArray());
+				RegisterPrimitivesWithNode(node, primKeys.ToArray());
 			}
 
 			exportNodeMarker.End();
