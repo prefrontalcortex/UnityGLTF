@@ -78,12 +78,13 @@ namespace UnityGLTF
 			Light,
 			Occlusion,
 			MetallicGloss_DontConvert,
+			CubeMap,
 			Custom_Unknown
 		}
 
 		private struct ImageInfo
 		{
-			public Texture2D texture;
+			public Texture texture;
 			public TextureMapType textureMapType;
 			public string outputPath;
 			public bool canBeExportedFromDisk;

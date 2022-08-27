@@ -2,6 +2,7 @@
 using System.IO;
 using GLTF.Schema;
 using UnityEngine;
+using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
 using WrapMode = GLTF.Schema.WrapMode;
 
@@ -40,20 +41,23 @@ namespace UnityGLTF
 					switch (textureMapType)
 					{
 						case TextureMapType.MetallicGloss:
-							ExportMetallicGlossTexture(image, fileOutputPath, true);
+							ExportMetallicGlossTexture(image as Texture2D, fileOutputPath, true);
 							break;
 						case TextureMapType.MetallicGloss_DontConvert:
 						case TextureMapType.Custom_Unknown:
 						case TextureMapType.Occlusion:
-							ExportMetallicGlossTexture(image, fileOutputPath, false);
+							ExportMetallicGlossTexture(image as Texture2D, fileOutputPath, false);
+							break;
+						case TextureMapType.CubeMap:
+							ExportCubeMapTexture(image as Cubemap, fileOutputPath);
 							break;
 						case TextureMapType.Bump:
-							ExportNormalTexture(image, fileOutputPath);
+							ExportNormalTexture(image as Texture2D, fileOutputPath);
 							break;
 						case TextureMapType.Main:
 						case TextureMapType.Emission:
 						default:
-							ExportTexture(image, fileOutputPath);
+							ExportTexture(image as Texture2D, fileOutputPath);
 							break;
 					}
 				}
@@ -77,6 +81,20 @@ namespace UnityGLTF
 			else
 				Graphics.Blit(texture, destRenderTexture);
 			WriteRenderTextureToDiskAndRelease(destRenderTexture, outputPath, true);
+		}
+
+		/// <summary>
+		/// This converts Unity's metallic-gloss texture representation into GLTF's metallic-roughness specifications.
+		/// Unity's metallic-gloss A channel (glossiness) is inverted and goes into GLTF's metallic-roughness G channel (roughness).
+		/// Unity's metallic-gloss R channel (metallic) goes into GLTF's metallic-roughess B channel.
+		/// </summary>
+		/// <param name="texture">Unity's metallic-gloss texture to be exported</param>
+		/// <param name="outputPath">The location to export the texture</param>
+		private void ExportCubeMapTexture(Cubemap texture, string outputPath)
+		{
+			var destRenderTexture = RenderTexture.GetTemporary(texture.width * 2, texture.height, 24);
+			Graphics.Blit(texture, destRenderTexture, new Material(Shader.Find("Hidden/CubemapToEquirectangular")));
+			WriteRenderTextureToDiskAndRelease(destRenderTexture, outputPath, false);
 		}
 
 		/// <summary>
@@ -159,7 +177,7 @@ namespace UnityGLTF
 		    {
 				texture.Source = ExportImage(textureObj, textureMapType);
 		    }
-			texture.Sampler = ExportSampler(textureObj);
+			texture.Sampler = ExportSampler(textureObj, textureMapType);
 
 			_textures.Add(textureObj);
 
@@ -203,6 +221,9 @@ namespace UnityGLTF
 
 			switch (textureMapType)
 			{
+				case TextureMapType.CubeMap:
+					textureHasAlpha = true;
+					break;
 				case TextureMapType.MetallicGloss:
 					textureHasAlpha = false;
 					break;
@@ -285,7 +306,7 @@ namespace UnityGLTF
 
             _imageInfos.Add(new ImageInfo
 			{
-				texture = texture as Texture2D,
+				texture = texture,
 				textureMapType = textureMapType,
 				outputPath = filenamePath,
 				canBeExportedFromDisk = canBeExportedFromDisk,
@@ -551,7 +572,7 @@ namespace UnityGLTF
 		    return id;
 		}
 
-		private SamplerId ExportSampler(Texture texture)
+		private SamplerId ExportSampler(Texture texture, TextureMapType textureMapType)
 		{
 			var samplerId = GetSamplerId(_root, texture);
 			if (samplerId != null)
