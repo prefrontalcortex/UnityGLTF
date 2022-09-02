@@ -45,6 +45,19 @@ namespace UnityGLTF
 		public GLTFSceneExporter.AfterMaterialExportDelegate AfterMaterialExport;
 	}
 
+	public class GLTFFileDescriptor {
+		public string uri;
+		public string mimeType;
+		public BufferViewId bufferView;
+	}
+
+	public class FileInfo {
+		public string fileName;
+		public string path;
+		public  string mimeType;
+	}
+
+
 	public partial class GLTFSceneExporter
 	{
 		// Available export callbacks.
@@ -96,10 +109,11 @@ namespace UnityGLTF
 		private BufferId _bufferId;
 		private GLTFBuffer _buffer;
 		private List<ImageInfo> _imageInfos;
+		private List<FileInfo> _fileInfos;
 		private List<Texture> _textures;
 		private Dictionary<int, int> _exportedMaterials;
 		private List<(Transform tr, AnimationClip clip)> _animationClips;
-		private bool _shouldUseInternalBufferForImages;
+		private bool _shouldUseInternalBuffer;
 		private Dictionary<int, int> _exportedTransforms;
 		private List<Transform> _animatedNodes;
 
@@ -287,6 +301,7 @@ namespace UnityGLTF
 			};
 
 			_imageInfos = new List<ImageInfo>();
+			_fileInfos = new List<FileInfo>();
 			_exportedMaterials = new Dictionary<int, int>();
 			_textures = new List<Texture>();
 			_animationClips = new List<(Transform, AnimationClip)>();
@@ -320,16 +335,17 @@ namespace UnityGLTF
 			var dirName = Path.GetDirectoryName(fullPath);
 			if (dirName != null && !Directory.Exists(dirName))
 				Directory.CreateDirectory(dirName);
-			_shouldUseInternalBufferForImages = true;
+			_shouldUseInternalBuffer = true;
 
 			using (FileStream glbFile = new FileStream(fullPath, FileMode.Create))
 			{
 				SaveGLBToStream(glbFile, fileName);
 			}
 
-			if (!_shouldUseInternalBufferForImages)
+			if (!_shouldUseInternalBuffer)
 			{
 				ExportImages(path);
+				ExportFiles(path);
 			}
 		}
 
@@ -340,7 +356,7 @@ namespace UnityGLTF
 		/// <returns></returns>
 		public byte[] SaveGLBToByteArray(string sceneName)
 		{
-			_shouldUseInternalBufferForImages = true;
+			_shouldUseInternalBuffer = true;
 			using (var stream = new MemoryStream())
 			{
 				SaveGLBToStream(stream, sceneName);
@@ -360,7 +376,7 @@ namespace UnityGLTF
 			exportGltfInitMarker.Begin();
 			Stream binStream = new MemoryStream();
 			Stream jsonStream = new MemoryStream();
-			_shouldUseInternalBufferForImages = true;
+			_shouldUseInternalBuffer = true;
 
 			_bufferWriter = new BinaryWriterWithLessAllocations(binStream);
 
@@ -453,7 +469,7 @@ namespace UnityGLTF
 			exportGltfMarker.Begin();
 
 			exportGltfInitMarker.Begin();
-			_shouldUseInternalBufferForImages = false;
+			_shouldUseInternalBuffer = false;
 			var toLower = fileName.ToLowerInvariant();
 			if (toLower.EndsWith(".gltf"))
 				fileName = fileName.Substring(0, fileName.Length - 5);
@@ -520,6 +536,7 @@ namespace UnityGLTF
 			binFile.Close();
 #endif
 			ExportImages(path);
+			ExportFiles(path);
 			gltfWriteOutMarker.End();
 
 			exportGltfMarker.End();
@@ -797,6 +814,19 @@ namespace UnityGLTF
 			}
 		}
 
+		private void ExportFiles(string outputPath) {
+			foreach (var fileInfo in _fileInfos) {
+				var fileOutputPath = Path.Combine(outputPath, fileInfo.fileName);
+
+				var dir = Path.GetDirectoryName(fileOutputPath);
+
+				if (!Directory.Exists(dir))
+					Directory.CreateDirectory(dir);
+
+				File.Copy(fileInfo.path, fileOutputPath, true);
+			}
+		}
+
 #region Public API
 
 		public int GetAnimationId(AnimationClip clip, Transform transform)
@@ -889,6 +919,31 @@ namespace UnityGLTF
 		}
 
 		public Texture GetTexture(int id) => _textures[id];
+
+		public GLTFFileDescriptor ExportFile(string path, string mimeType) {
+			var fileDescriptor = new GLTFFileDescriptor();
+			var fileName = Path.GetFileName(path);
+
+			if (_shouldUseInternalBuffer) {
+				byte[] data = File.ReadAllBytes(path);
+				AlignToBoundary(_bufferWriter.BaseStream, 0x00);
+				uint byteOffset = CalculateAlignment((uint)_bufferWriter.BaseStream.Position, 4);
+				_bufferWriter.Write(data);
+				uint byteLength = CalculateAlignment((uint)_bufferWriter.BaseStream.Position - byteOffset, 4);
+				fileDescriptor.bufferView = ExportBufferView((uint)byteOffset, (uint)byteLength);
+				fileDescriptor.mimeType = mimeType;
+			} else {
+				fileDescriptor.uri = fileName;
+			}
+
+			_fileInfos.Add(new FileInfo() {
+				fileName = fileName,
+				path = path,
+				mimeType = mimeType,
+			});
+
+			return fileDescriptor;
+		}
 
 #endregion
 	}
