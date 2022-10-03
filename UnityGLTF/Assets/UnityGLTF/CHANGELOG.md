@@ -4,16 +4,73 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [1.12.0-pre] - 2022-08-12
-- remove: public settings API on GLTFSceneExporter is now gone. Pass in custom settings via ExportOptions if needed.
+## [1.16.2-pre] - 2022-09-30
+- fix: blend shapes and blend shape animations were not imported (note: sparse accessor import not working yet)
+- fix: allow doublesided and transparent import on 2020.3 URP with PBRGraph
+- fix: make RegisterPrimitivesWithNode API public, belongs to ExportMesh
+- fix: UnlitGraph used wrong texture transform in some cases
+- fix: BiRP texture import on legacy shaders in < 2020.3 had flipped texture transforms
+- fix: ExporterMaterials compilation issue on 2018.x
+- fix: some TMPro materials were exported incorrectly
+
+## [1.16.1-pre] - 2022-09-25
+- fix: first-time import was failing to find shaders on 2020.x in some cases
+- fix: TMPro texture conversion one export was blurry at the bottom of the texture
+- fix: transmission/volume mat was incorrectly imported
+- fix: transparency was incorrectly imported on 2020.x
+- fix: material validation on 2021.x wasn't properly turning transparency on for some imports
+- fix: no compilation errors on 2018.4 + 2019.4
+
+## [1.16.0-pre] - 2022-09-21
+- fix: checking materials for _ST shader properties was failing on specific Unity versions
+- fix: AnimationPointerResolver was warning in cases that are allowed / no warning needed
+- fix: build compilation issues on 2022+
+- fix: default scene name differed from glTFast, which broke switching importers. Both use "Scene" now
+- fix: import warnings for metallicRoughness texture swizzling only print when a metallicRoughness texture is actually used
+- feat: tangents are recalculated on import now
+- feat: TMPro meshes export with baked texture now instead of SDF texture
+- feat: added AfterTextureExportDelegate/BeforeTextureExportDelegate and UniqueTexture hash for modifying textures on export
+- change: explicit bool option to turn KHR_materials_volume export on and off
+- change: removed outdated samples from package
+- change: if a mesh in the glTF doesn't specify a name it will import without name now instead of using a default name
+
+## [1.15.0-pre] - 2022-09-13
+- fix: workaround for ShaderGraph bug on 2021.2+ that breaks defining baseColorTexture_ST manually
+- fix: workaround for Unity regression in 2022.1+ where checking material properties returns wrong results in some cases
+- feat: allow exporting of Humanoid animation clips (get baked to generic)
+- change: texture aniso values >= 1 now result in LinearMipmapLinear filtering to match visual result in Unity better
+
+## [1.14-0-pre] - 2022-09-11
+- fix: log error instead of exception for missing textures on export
+- feat: allow referencing GameObjects for `KHR_animation_pointer`
+- change: animated fields with `KHR_animation_pointer` now try to find their correct Unity properties instead of the serialized field (m_ prefix disappears)
+
+## [1.13.0-pre] - 2022-09-05
+- add: preliminary HDR texture export in EXT_texture_exr extension
+- fix: Unity Editor module related issues
+- fix: wrongly exporting two keyframes for animations with only one keyframe
+- fix: children of lights and cameras were inverted
+
+## [1.12.2-pre] - 2022-08-29
+- fix: KHR_animation_pointer export where member is declared on base type
+
+## [1.12.1-pre] - 2022-08-23
+- fix: nullref in export of missing mesh
+
+## [1.12.0-pre] - 2022-08-23
 - fix: emissive color alpha was set to 1 in some roundtrip cases when it should have been 0
-- fix: nullref when glTF had null textures (against the spec but other viewers tolerate it)
+- fix: nullref in import when glTF had null textures (against the spec, but other viewers tolerate it)
 - fix: unlit double sided was incorrectly imported in BiRP
 - fix: PBRGraphUI didn't properly draw infos for SkinnedMeshRenderer
 - fix: added safeguards against Shader.Find not working in first imports (fixes #51)
+- fix: textures without mipmaps should export closer to intended now
 - fix: missing pbrMetallicRoughness property was treated incorrectly
+- fix: BeforeSceneExport was missing from gltf+bin exports
 - feat: warn in PBRGraphGUI when UV0 isn't present (fixes #52)
 - feat: texture channel swizzling on URP/Lit > PBRGraph material conversion in 2022.1+
+- feat: expose ExportMesh API using UniquePrimitive array to export arbitrary meshes from extensions (#55, thanks @robertlong)
+- feat: GLTFSettings can now be passed into GLTFSceneExporter directly, falls back to project settings if none are provided
+- remove: public settings API on GLTFSceneExporter is now gone. Pass in custom settings via ExportOptions if needed.
 
 ## [1.11.0-pre] - 2022-07-27
 - fix: converting PBRGraph and UnlitGraph to each other shouldn't warn

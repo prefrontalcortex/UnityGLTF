@@ -7,8 +7,8 @@ namespace UnityGLTF
 		private Vector2 diffuseOffset = new Vector2(0, 0);
 		private Vector2 specGlossOffset = new Vector2(0, 0);
 
-		public SpecGloss2StandardMap(int MaxLOD = 1000) : base("Standard (Specular setup)", MaxLOD) { }
-		protected SpecGloss2StandardMap(string shaderName, int MaxLOD = 1000) : base(shaderName, MaxLOD) { }
+		public SpecGloss2StandardMap(int MaxLOD = 1000) : base("Standard (Specular setup)", null, MaxLOD) { }
+		protected SpecGloss2StandardMap(string shaderName, string shaderGuid, int MaxLOD = 1000) : base(shaderName, shaderGuid, MaxLOD) { }
 		protected SpecGloss2StandardMap(Material m, int MaxLOD = 1000) : base(m, MaxLOD) { }
 
 		public virtual Texture DiffuseTexture
@@ -30,8 +30,7 @@ namespace UnityGLTF
 			set
 			{
 				diffuseOffset = value;
-				var unitySpaceVec = new Vector2(diffuseOffset.x, 1 - DiffuseXScale.y - diffuseOffset.y);
-				_material.SetTextureOffset("_MainTex", unitySpaceVec);
+				_material.SetTextureOffset("_MainTex", value);
 			}
 		}
 
@@ -87,8 +86,7 @@ namespace UnityGLTF
 			set
 			{
 				specGlossOffset = value;
-				var unitySpaceVec = new Vector2(specGlossOffset.x, 1 - SpecularGlossinessXScale.y - specGlossOffset.y);
-				_material.SetTextureOffset("_SpecGlossMap", unitySpaceVec);
+				_material.SetTextureOffset("_SpecGlossMap", value);
 			}
 		}
 
