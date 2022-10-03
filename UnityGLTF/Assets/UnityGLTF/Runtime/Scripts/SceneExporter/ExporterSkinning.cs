@@ -13,10 +13,13 @@ namespace UnityGLTF
 		{
 			exportSkinFromNodeMarker.Begin();
 
-			PrimKey key = new PrimKey();
-			UnityEngine.Mesh mesh = GetMeshFromGameObject(transform.gameObject);
+			var go = transform.gameObject;
+			var skin = transform.GetComponent<SkinnedMeshRenderer>();
+			var mesh = GetMeshFromGameObject(go);
+			UniquePrimitive key = new UniquePrimitive();
 			key.Mesh = mesh;
-			key.Materials = GetMaterialsFromGameObject(transform.gameObject);
+			key.SkinnedMeshRenderer = skin;
+			key.Materials = GetMaterialsFromGameObject(go);
 			MeshId val;
 			if (!_primOwner.TryGetValue(key, out val))
 			{
@@ -24,7 +27,6 @@ namespace UnityGLTF
 				exportSkinFromNodeMarker.End();
 				return;
 			}
-			SkinnedMeshRenderer skin = transform.GetComponent<SkinnedMeshRenderer>();
 			GLTF.Schema.Skin gltfSkin = new Skin();
 
 			// early out of this SkinnedMeshRenderer has no bones assigned (could be BlendShapes-only)

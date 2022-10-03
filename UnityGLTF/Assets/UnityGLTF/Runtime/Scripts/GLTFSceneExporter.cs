@@ -28,7 +28,7 @@ namespace UnityGLTF
 		internal readonly GLTFSettings settings;
 
 		public ExportOptions() : this(GLTFSettings.GetOrCreateSettings()) { }
-		
+
 		public ExportOptions(GLTFSettings settings)
 		{
 			if (!settings) settings = GLTFSettings.GetOrCreateSettings();
@@ -43,6 +43,8 @@ namespace UnityGLTF
 		public GLTFSceneExporter.AfterNodeExportDelegate AfterNodeExport;
 		public GLTFSceneExporter.BeforeMaterialExportDelegate BeforeMaterialExport;
 		public GLTFSceneExporter.AfterMaterialExportDelegate AfterMaterialExport;
+		public GLTFSceneExporter.BeforeTextureExportDelegate BeforeTextureExport;
+		public GLTFSceneExporter.AfterTextureExportDelegate AfterTextureExport;
 	}
 
 	public class GLTFFileDescriptor {
@@ -67,6 +69,8 @@ namespace UnityGLTF
 		public delegate void BeforeSceneExportDelegate(GLTFSceneExporter exporter, GLTFRoot gltfRoot);
 		public delegate void AfterSceneExportDelegate(GLTFSceneExporter exporter, GLTFRoot gltfRoot);
 		public delegate void AfterNodeExportDelegate(GLTFSceneExporter exporter, GLTFRoot gltfRoot, Transform transform, Node node);
+		public delegate void BeforeTextureExportDelegate(GLTFSceneExporter exporter, ref UniqueTexture texture, TextureMapType type);
+		public delegate void AfterTextureExportDelegate(GLTFSceneExporter exporter, UniqueTexture texture, int index, GLTFTexture tex);
 
 		private static ILogger Debug = UnityEngine.Debug.unityLogger;
 
@@ -91,7 +95,8 @@ namespace UnityGLTF
 			Light,
 			Occlusion,
 			MetallicGloss_DontConvert,
-			Custom_Unknown
+			Custom_Unknown,
+			Custom_HDR,
 		}
 
 		private struct ImageInfo
@@ -110,9 +115,11 @@ namespace UnityGLTF
 		private GLTFBuffer _buffer;
 		private List<ImageInfo> _imageInfos;
 		private List<FileInfo> _fileInfos;
-		private List<Texture> _textures;
+		private List<UniqueTexture> _textures;
 		private Dictionary<int, int> _exportedMaterials;
+#if ANIMATION_SUPPORTED
 		private List<(Transform tr, AnimationClip clip)> _animationClips;
+#endif
 		private bool _shouldUseInternalBuffer;
 		private Dictionary<int, int> _exportedTransforms;
 		private List<Transform> _animatedNodes;
@@ -130,12 +137,50 @@ namespace UnityGLTF
 		private const int GLTFHeaderSize = 12;
 		private const int SectionHeaderSize = 8;
 
-		protected struct PrimKey
+		public struct UniqueTexture : IEquatable<UniqueTexture>
 		{
-			public bool Equals(PrimKey other)
+			public Texture Texture;
+			public int MaxSize;
+
+			public int GetWidth() => Mathf.Min(MaxSize, Texture.width);
+			public int GetHeight() => Mathf.Min(MaxSize, Texture.height);
+
+			public UniqueTexture(Texture tex)
+			{
+				this.Texture = tex;
+				MaxSize = Mathf.Max(tex.width, tex.height);
+			}
+
+			public bool Equals(UniqueTexture other)
+			{
+				return Equals(Texture, other.Texture) && MaxSize == other.MaxSize;
+			}
+
+			public override bool Equals(object obj)
+			{
+				return obj is UniqueTexture other && Equals(other);
+			}
+
+			public override int GetHashCode()
+			{
+				unchecked
+				{
+					return ((Texture != null ? Texture.GetHashCode() : 0) * 397) ^ MaxSize;
+				}
+			}
+		}
+
+		/// <summary>
+		/// A Primitive is a combination of Mesh + Material(s). It also contains a reference to the original SkinnedMeshRenderer,
+		/// if any, since that's the only way to get the actual current weights to export a blend shape primitive.
+		/// </summary>
+		public struct UniquePrimitive
+		{
+			public bool Equals(UniquePrimitive other)
 			{
 				if (!Equals(Mesh, other.Mesh)) return false;
 				if (Materials == null && other.Materials == null) return true;
+				if (!Equals(SkinnedMeshRenderer, other.SkinnedMeshRenderer)) return false;
 				if (!(Materials != null && other.Materials != null)) return false;
 				if (!Equals(Materials.Length, other.Materials.Length)) return false;
 				for (var i = 0; i < Materials.Length; i++)
@@ -148,7 +193,7 @@ namespace UnityGLTF
 
 			public override bool Equals(object obj)
 			{
-				return obj is PrimKey other && Equals(other);
+				return obj is UniquePrimitive other && Equals(other);
 			}
 
 			public override int GetHashCode()
@@ -156,6 +201,10 @@ namespace UnityGLTF
 				unchecked
 				{
 					var code = (Mesh != null ? Mesh.GetHashCode() : 0) * 397;
+					if (SkinnedMeshRenderer != null)
+					{
+						code = code ^ SkinnedMeshRenderer.GetHashCode() * 397;
+					}
 					if (Materials != null)
 					{
 						code = code ^ Materials.Length.GetHashCode() * 397;
@@ -169,9 +218,10 @@ namespace UnityGLTF
 
 			public Mesh Mesh;
 			public Material[] Materials;
+			public SkinnedMeshRenderer SkinnedMeshRenderer; // needed for BlendShape export, since Unity stores the actually used blend shape weights on the renderer. see ExporterMeshes.ExportBlendShapes
 		}
 
-		private readonly Dictionary<PrimKey, MeshId> _primOwner = new Dictionary<PrimKey, MeshId>();
+		private readonly Dictionary<UniquePrimitive, MeshId> _primOwner = new Dictionary<UniquePrimitive, MeshId>();
 
 		#region Settings
 
@@ -248,6 +298,10 @@ namespace UnityGLTF
 		{
 		}
 
+		public GLTFSceneExporter(Transform rootTransform, ExportOptions options) : this(new [] { rootTransform }, options)
+		{
+		}
+
 		/// <summary>
 		/// Create a GLTFExporter that exports out a transform
 		/// </summary>
@@ -303,8 +357,10 @@ namespace UnityGLTF
 			_imageInfos = new List<ImageInfo>();
 			_fileInfos = new List<FileInfo>();
 			_exportedMaterials = new Dictionary<int, int>();
-			_textures = new List<Texture>();
+			_textures = new List<UniqueTexture>();
+#if ANIMATION_SUPPORTED
 			_animationClips = new List<(Transform, AnimationClip)>();
+#endif
 
 			_buffer = new GLTFBuffer();
 			_bufferId = new BufferId
@@ -696,7 +752,8 @@ namespace UnityGLTF
 				node.Light = ExportLight(unityLight);
 			}
 
-            if (unityLight != null || unityCamera != null)
+			var needsInvertedLookDirection = unityLight || unityCamera;
+            if (needsInvertedLookDirection)
             {
                 node.SetUnityTransform(nodeTransform, true);
             }
@@ -717,12 +774,15 @@ namespace UnityGLTF
 			_root.Nodes.Add(node);
 
 			// children that are primitives get put in a mesh
-			GameObject[] primitives, nonPrimitives;
-			FilterPrimitives(nodeTransform, out primitives, out nonPrimitives);
+			FilterPrimitives(nodeTransform, out GameObject[] primitives, out GameObject[] nonPrimitives);
 			if (primitives.Length > 0)
 			{
-				node.Mesh = ExportMesh(nodeTransform.name, primitives);
-				RegisterPrimitivesWithNode(node, primitives);
+				var uniquePrimitives = GetUniquePrimitivesFromGameObjects(primitives);
+				if (uniquePrimitives != null)
+				{
+					node.Mesh = ExportMesh(nodeTransform.name, uniquePrimitives);
+					RegisterPrimitivesWithNode(node, uniquePrimitives);
+				}
 			}
 
 			exportNodeMarker.End();
@@ -730,11 +790,40 @@ namespace UnityGLTF
 			// children that are not primitives get added as child nodes
 			if (nonPrimitives.Length > 0)
 			{
-				node.Children = new List<NodeId>(nonPrimitives.Length);
+				var parentOfChilds = node;
+
+				// when we're exporting a light or camera, we add an implicit node as first child of the camera/light node.
+				// this ensures that child objects and animations etc. "just work".
+				if (needsInvertedLookDirection)
+				{
+					var inbetween = new Node();
+
+					if (ExportNames)
+					{
+						inbetween.Name = nodeTransform.name + "-flipped";
+					}
+
+					inbetween.Rotation = Quaternion.Inverse(SchemaExtensions.InvertDirection).ToGltfQuaternionConvert();
+
+					var inbetweenId = new NodeId
+					{
+						Id = _root.Nodes.Count,
+						Root = _root
+					};
+
+					_root.Nodes.Add(inbetween);
+
+					node.Children = new List<NodeId>(1);
+					node.Children.Add(inbetweenId);
+
+					parentOfChilds = inbetween;
+				}
+
+				parentOfChilds.Children = new List<NodeId>(nonPrimitives.Length);
 				foreach (var child in nonPrimitives)
 				{
 					if(!ShouldExportTransform(child.transform)) continue;
-					node.Children.Add(ExportNode(child.transform));
+					parentOfChilds.Children.Add(ExportNode(child.transform));
 				}
 			}
 
@@ -828,6 +917,7 @@ namespace UnityGLTF
 		}
 
 #region Public API
+#if ANIMATION_SUPPORTED
 
 		public int GetAnimationId(AnimationClip clip, Transform transform)
 		{
@@ -838,6 +928,7 @@ namespace UnityGLTF
 			}
 			return -1;
 		}
+#endif
 
 		public MaterialId GetMaterialId(GLTFRoot root, Material materialObj)
 		{
@@ -857,7 +948,7 @@ namespace UnityGLTF
 		{
 			for (var i = 0; i < _textures.Count; i++)
 			{
-				if (_textures[i] == textureObj)
+				if (_textures[i].Texture == textureObj)
 				{
 					return new TextureId
 					{
@@ -866,7 +957,22 @@ namespace UnityGLTF
 					};
 				}
 			}
+			return null;
+		}
 
+		public TextureId GetTextureId(GLTFRoot root, UniqueTexture textureObj)
+		{
+			for (var i = 0; i < _textures.Count; i++)
+			{
+				if (_textures[i].Equals(textureObj))
+				{
+					return new TextureId
+					{
+						Id = i,
+						Root = root
+					};
+				}
+			}
 			return null;
 		}
 
@@ -918,7 +1024,7 @@ namespace UnityGLTF
 			return null;
 		}
 
-		public Texture GetTexture(int id) => _textures[id];
+		public Texture GetTexture(int id) => _textures[id].Texture;
 
 		public GLTFFileDescriptor ExportFile(string path, string mimeType) {
 			var fileDescriptor = new GLTFFileDescriptor();

@@ -12,6 +12,7 @@ using System.Linq;
 using System.Reflection;
 using GLTF.Schema;
 using UnityEngine;
+using UnityEngine.Playables;
 using UnityGLTF.Extensions;
 using Object = UnityEngine.Object;
 
@@ -24,7 +25,7 @@ namespace UnityGLTF
 {
 	public partial class GLTFSceneExporter
 	{
-#if ANIMATION_EXPORT_SUPPORTED
+#if ANIMATION_SUPPORTED
 		private readonly Dictionary<(AnimationClip clip, float speed), GLTFAnimation> _clipToAnimation = new Dictionary<(AnimationClip, float), GLTFAnimation>();
 #endif
 #if ANIMATION_SUPPORTED
@@ -66,7 +67,7 @@ namespace UnityGLTF
 			exportAnimationFromNodeMarker.End();
 		}
 
-#if ANIMATION_EXPORT_SUPPORTED
+#if ANIMATION_SUPPORTED
 		private IEnumerable<AnimatorState> GetAnimatorStateParametersForClip(AnimationClip clip, AnimatorController animatorController)
 		{
 			if (!clip)
@@ -210,7 +211,7 @@ namespace UnityGLTF
 			}
 		}
 
-		private struct TargetCurveSet
+		internal struct TargetCurveSet
 		{
 			#pragma warning disable 0649
 			public AnimationCurve[] translationCurves;
@@ -231,6 +232,8 @@ namespace UnityGLTF
 				{
 					var prop = new PropertyCurve(animatedObject, binding);
 					prop.curve.Add(curve);
+					if (animatedObject is GameObject || animatedObject is Component)
+						TryFindMemberBinding(binding, prop, prop.propertyName);
 					propertyCurves.Add(binding.propertyName, prop);
 				}
 				else
@@ -288,7 +291,6 @@ namespace UnityGLTF
 											break;
 										case ShaderUtil.ShaderPropertyType.Float:
 											prop.propertyType = typeof(float);
-											prop.propertyType = typeof(float);
 											break;
 										case ShaderUtil.ShaderPropertyType.TexEnv:
 											prop.propertyType = typeof(Texture);
@@ -313,17 +315,68 @@ namespace UnityGLTF
 									break;
 							}
 						}
+						else if (animatedObject is Camera)
+						{
+							// types match, names are explicitly handled in ExporterAnimationPointer.cs
+						}
 						else
 						{
-							var member = binding.type
-								.GetMember(prop.propertyName, BindingFlags.Default | BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-								.FirstOrDefault();
-							if (member is FieldInfo field) prop.propertyType = field.FieldType;
-							else if (member is PropertyInfo p) prop.propertyType = p.PropertyType;
-							Debug.LogWarning($"No property conversion found: implicitly handling animated property {prop.propertyName} ({prop.propertyType}) on target {prop.target}", prop.target);
+							TryFindMemberBinding(binding, prop, prop.propertyName);
+							// var member = FindMemberOnTypeIncludingBaseTypes(binding.type, prop.propertyName);
+							// if (member is FieldInfo field) prop.propertyType = field.FieldType;
+							// else if (member is PropertyInfo p) prop.propertyType = p.PropertyType;
+							// if(prop.propertyType == null)
+							// 	Debug.LogWarning($"Member {prop.propertyName} not found on {binding.type}: implicitly handling animated property {prop.propertyName} ({prop.propertyType}) on target {prop.target}", prop.target);
 						}
 					}
 				}
+			}
+
+			private static bool TryFindMemberBinding(EditorCurveBinding binding, PropertyCurve prop, string memberName, int iteration = 0)
+			{
+				// explicitly handled
+				if(binding.type == typeof(Camera) || binding.type == typeof(Light))
+					return true;
+
+				if (memberName == "m_IsActive")
+				{
+					prop.propertyType = typeof(float);
+					prop.propertyName = "activeSelf";
+					return true;
+				}
+
+				var member = FindMemberOnTypeIncludingBaseTypes(binding.type, memberName);
+				if (member is FieldInfo field) prop.propertyType = field.FieldType;
+				else if (member is PropertyInfo p) prop.propertyType = p.PropertyType;
+				if (member != null)
+				{
+					prop.propertyName = member.Name;
+					return true;
+				}
+
+				if (iteration == 0)
+				{
+					// some members start with m_, for example m_AnchoredPosition in RectTransform but the field/property name is actually anchoredPosition
+					if (memberName.StartsWith("m_"))
+					{
+						memberName = char.ToLowerInvariant(memberName[2]) + memberName.Substring(3);
+						return TryFindMemberBinding(binding, prop, memberName, ++iteration);
+					}
+				}
+
+				Debug.LogWarning($"Member {prop.propertyName} not found on {binding.type}: implicitly handling animated property {prop.propertyName} ({prop.propertyType}) on target {prop.target}", prop.target);
+				return false;
+			}
+
+			private static MemberInfo FindMemberOnTypeIncludingBaseTypes(Type type, string memberName)
+			{
+				while (type != null)
+				{
+					var member = type.GetMember(memberName, BindingFlags.Default | BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+					if (member.Length > 0) return member[0];
+					type = type.BaseType;
+				}
+				return null;
 			}
 
 			public void Init()
@@ -397,7 +450,7 @@ namespace UnityGLTF
 									var obj = animationPointer.animatedObject;
 									if (obj is Component c)
 										obj = c.transform;
-									if (obj is Transform transform && transform == alreadyExportedTransform)
+									if (obj is Transform tr2 && tr2 == alreadyExportedTransform)
 										return true;
 								}
 								return false;
@@ -535,6 +588,12 @@ namespace UnityGLTF
 		{
 #if UNITY_EDITOR
 
+			if (clip.humanMotion)
+			{
+				CollectClipCurvesForHumanoid(root, clip, targetCurves);
+				return;
+			}
+
 			foreach (var binding in UnityEditor.AnimationUtility.GetCurveBindings(clip))
 			{
 				AnimationCurve curve = UnityEditor.AnimationUtility.GetEditorCurve(clip, binding);
@@ -546,7 +605,11 @@ namespace UnityGLTF
 				var containsBlendShapeWeight = binding.propertyName.StartsWith("blendShape.", StringComparison.Ordinal);
 				var containsCompatibleData = containsPosition || containsScale || containsRotation || containsEuler || containsBlendShapeWeight;
 
-				if (!containsCompatibleData && !settings.UseAnimationPointer) continue;
+				if (!containsCompatibleData && !settings.UseAnimationPointer)
+				{
+					Debug.LogWarning("No compatible data found in clip binding: " + binding.propertyName, clip);
+					continue;
+				}
 
 				if (!targetCurves.ContainsKey(binding.path))
 				{
@@ -721,7 +784,8 @@ namespace UnityGLTF
 		{
 			int nbSamples = Mathf.Max(1, Mathf.CeilToInt(length * bakingFramerate));
 			float deltaTime = length / nbSamples;
-			nbSamples += 1;
+			if(nbSamples > 1)
+				nbSamples += 1;
 			var weightCount = curveSet.weightCurves?.Count ?? 0;
 
 			bool haveTranslationKeys = curveSet.translationCurves != null && curveSet.translationCurves.Length > 0 && curveSet.translationCurves[0] != null;
@@ -835,6 +899,7 @@ namespace UnityGLTF
 				case Light l: return GetLightIndex(l);
 				case Camera c: return GetCameraIndex(c);
 				case Transform t: return GetTransformIndex(t);
+				case GameObject g: return GetTransformIndex(g.transform);
 				case Component k: return GetTransformIndex(k.transform);
 			}
 

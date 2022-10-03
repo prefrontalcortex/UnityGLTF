@@ -1,5 +1,4 @@
-﻿using System;
-using GLTF.Schema;
+﻿using GLTF.Schema;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Material = UnityEngine.Material;
@@ -17,9 +16,14 @@ namespace UnityGLTF
 		private Vector2 occlusionOffset = new Vector2(0, 0);
 		private Vector2 emissiveOffset = new Vector2(0, 0);
 
-		protected StandardMap(string shaderName, int MaxLOD = 1000)
+		protected StandardMap(string shaderName, string fallbackGuid, int MaxLOD = 1000)
 		{
 			var s = Shader.Find(shaderName);
+#if UNITY_EDITOR
+			// workaround for first-import issues with Shader.Find and import order
+			if (!s && fallbackGuid != null)
+				s = UnityEditor.AssetDatabase.LoadAssetAtPath<Shader>(UnityEditor.AssetDatabase.GUIDToAssetPath(fallbackGuid));
+#endif
 			if (s == null)
 			{
 				throw new ShaderNotFoundException(shaderName + " not found. Did you forget to add it to the build?");
@@ -86,8 +90,7 @@ namespace UnityGLTF
 			set
 			{
 				normalOffset = value;
-				var unitySpaceVec = new Vector2(normalOffset.x, 1 - NormalXScale.y - normalOffset.y);
-				_material.SetTextureOffset("_BumpMap", unitySpaceVec);
+				_material.SetTextureOffset("_BumpMap", value);
 			}
 		}
 
@@ -157,8 +160,7 @@ namespace UnityGLTF
 			set
 			{
 				occlusionOffset = value;
-				var unitySpaceVec = new Vector2(occlusionOffset.x, 1 - OcclusionXScale.y - occlusionOffset.y);
-				_material.SetTextureOffset("_OcclusionMap", unitySpaceVec);
+				_material.SetTextureOffset("_OcclusionMap", value);
 			}
 		}
 
@@ -229,8 +231,7 @@ namespace UnityGLTF
 			set
 			{
 				emissiveOffset = value;
-				var unitySpaceVec = new Vector2(emissiveOffset.x, 1 - EmissiveXScale.y - emissiveOffset.y);
-				_material.SetTextureOffset("_EmissionMap", unitySpaceVec);
+				_material.SetTextureOffset("_EmissionMap", value);
 			}
 		}
 
