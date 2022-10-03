@@ -36,12 +36,12 @@ namespace UnityGLTF
 {
 #if UNITY_2020_2_OR_NEWER
 #if ENABLE_DEFAULT_GLB_IMPORTER
-    [ScriptedImporter(3, new[] { "glb", "gltf" })]
+    [ScriptedImporter(5, new[] { "glb", "gltf" })]
 #else
-    [ScriptedImporter(4, null, overrideExts: new[] { "glb", "gltf" })]
+    [ScriptedImporter(5, null, overrideExts: new[] { "glb", "gltf" })]
 #endif
 #else
-	[ScriptedImporter(3, new[] { "glb" })]
+	[ScriptedImporter(5, new[] { "glb" })]
 #endif
     public class GLTFImporter : ScriptedImporter
     {
@@ -63,18 +63,19 @@ namespace UnityGLTF
 	    }
 
 	    [Tooltip("Turn this off to create an explicit GameObject for the glTF scene. A scene root will always be created if there's more than one root node.")]
-        [SerializeField] private bool _removeEmptyRootObjects = true;
-        [SerializeField] private float _scaleFactor = 1.0f;
-        [SerializeField] private int _maximumLod = 300;
-        [SerializeField] private bool _readWriteEnabled = true;
-        [SerializeField] private bool _generateColliders = false;
-        [SerializeField] private bool _swapUvs = false;
-        [SerializeField] private bool _generateLightmapUVs = false;
-        [SerializeField] private GLTFImporterNormals _importNormals = GLTFImporterNormals.Import;
-        [SerializeField] private AnimationMethod _importAnimations = AnimationMethod.Mecanim;
-        [SerializeField] private bool _importMaterials = true;
+        [SerializeField] internal bool _removeEmptyRootObjects = true;
+        [SerializeField] internal float _scaleFactor = 1.0f;
+        [SerializeField] internal int _maximumLod = 300;
+        [SerializeField] internal bool _readWriteEnabled = true;
+        [SerializeField] internal bool _generateColliders = false;
+        [SerializeField] internal bool _swapUvs = false;
+        [SerializeField] internal bool _generateLightmapUVs = false;
+        [SerializeField] internal GLTFImporterNormals _importNormals = GLTFImporterNormals.Import;
+        [SerializeField] internal GLTFImporterNormals _importTangents = GLTFImporterNormals.Import;
+        [SerializeField] internal AnimationMethod _importAnimations = AnimationMethod.Mecanim;
+        [SerializeField] internal bool _importMaterials = true;
         [Tooltip("Enable this to get the same main asset identifiers as glTFast uses. This is recommended for new asset imports. Note that changing this for already imported assets will break their scene references and require manually re-adding the affected assets.")]
-        [SerializeField] private bool _useSceneNameIdentifier = false;
+        [SerializeField] internal bool _useSceneNameIdentifier = false;
 
         [Serializable]
         internal class ExtensionInfo
@@ -97,8 +98,10 @@ namespace UnityGLTF
 #endif
 
         // Import messages (extensions, warnings, errors, ...)
-        [NonReorderable] [SerializeField] private List<ExtensionInfo> _extensions;
+        [NonReorderable] [SerializeField] internal List<ExtensionInfo> _extensions;
         [NonReorderable] [SerializeField] private List<TextureInfo> _textures;
+        [SerializeField] internal string _mainAssetIdentifier;
+
         internal List<TextureInfo> Textures => _textures;
 
         public override void OnImportAsset(AssetImportContext ctx)
@@ -133,7 +136,9 @@ namespace UnityGLTF
                         gltfScene.GetComponents<Component>().Length == 1)
                     {
                         var parent = gltfScene;
+                        var importName = parent.name;
                         gltfScene = gltfScene.transform.GetChild(0).gameObject;
+                        gltfScene.name = importName; // root name is always name of the file anyways
                         t = gltfScene.transform;
                         t.parent = null; // To keep transform information in the new parent
                         DestroyImmediate(parent); // Get rid of the parent
@@ -201,24 +206,28 @@ namespace UnityGLTF
                         if(uv.Length > 0)
 							mesh.uv2 = uv;
                     }
+
                     if (_importNormals == GLTFImporterNormals.None)
-                    {
                         mesh.normals = new Vector3[0];
-                    }
-                    if (_importNormals == GLTFImporterNormals.Calculate && mesh.GetTopology(0) == MeshTopology.Triangles)
-                    {
+                    else if (_importNormals == GLTFImporterNormals.Calculate && mesh.GetTopology(0) == MeshTopology.Triangles)
                         mesh.RecalculateNormals();
-                    }
-                    mesh.UploadMeshData(!_readWriteEnabled);
+                    else if (_importNormals == GLTFImporterNormals.Import && mesh.normals.Length == 0)
+	                    mesh.RecalculateNormals();
+
+					if (_importTangents == GLTFImporterNormals.None)
+						mesh.tangents = new Vector4[0];
+					else if (_importTangents == GLTFImporterNormals.Calculate && mesh.GetTopology(0) == MeshTopology.Triangles)
+						mesh.RecalculateTangents();
+					else if (_importTangents == GLTFImporterNormals.Import && mesh.tangents.Length == 0)
+						mesh.RecalculateTangents();
+
+					mesh.UploadMeshData(!_readWriteEnabled);
 
                     if (_generateColliders)
                     {
                         var collider = mf.gameObject.AddComponent<MeshCollider>();
                         collider.sharedMesh = mesh;
                     }
-
-	                var meshName = string.IsNullOrEmpty(mesh.name) ? mf.gameObject.name : mesh.name;
-	                mesh.name = meshName;
 
                     return mesh;
                 }).Where(x => x).ToArray();
@@ -334,7 +343,9 @@ namespace UnityGLTF
                         }
                     }
 
+#if !UNITY_2022_1_OR_NEWER
 					AssetDatabase.Refresh();
+#endif
 
                     // Save materials as separate assets and rewrite refs
                     if (materials.Length > 0)
@@ -345,8 +356,10 @@ namespace UnityGLTF
                         }
                     }
 
-					AssetDatabase.SaveAssets();
+#if !UNITY_2022_1_OR_NEWER
+			        AssetDatabase.SaveAssets();
 					AssetDatabase.Refresh();
+#endif
 				}
                 else
                 {
@@ -381,12 +394,14 @@ namespace UnityGLTF
 	        if (!_useSceneNameIdentifier)
 	        {
 		        // Set main asset
-		        ctx.AddObjectToAsset("main asset", gltfScene);
+		        _mainAssetIdentifier = "main asset";
+		        ctx.AddObjectToAsset(_mainAssetIdentifier, gltfScene);
 	        }
 	        else
 	        {
 		        // This will be a breaking change, but would be aligned to the import naming from glTFast - allows switching back and forth between importers.
-		        ctx.AddObjectToAsset($"scenes/{gltfScene.name}", gltfScene);
+		        _mainAssetIdentifier = $"scenes/{gltfScene.name}";
+		        ctx.AddObjectToAsset(_mainAssetIdentifier, gltfScene);
 	        }
 
 	        // Add meshes

@@ -4,6 +4,9 @@ using GLTF.Schema;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityGLTF.Extensions;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace UnityGLTF
 {
@@ -120,7 +123,8 @@ namespace UnityGLTF
 			}
 
 			material.DoubleSided = (materialObj.HasProperty("_Cull") && materialObj.GetInt("_Cull") == (int)CullMode.Off) ||
-			                       (materialObj.HasProperty("_CullMode") && materialObj.GetInt("_CullMode") == (int)CullMode.Off);
+			                       (materialObj.HasProperty("_CullMode") && materialObj.GetInt("_CullMode") == (int)CullMode.Off) ||
+			                       (materialObj.shader.name.EndsWith("-Double")); // workaround for exporting shaders that are set to double-sided on 2020.3
 
 			if (materialObj.IsKeywordEnabled("_EMISSION") || materialObj.IsKeywordEnabled("EMISSION") || materialObj.HasProperty("emissiveTexture") || materialObj.HasProperty("_EmissiveTexture"))
 			{
@@ -326,6 +330,24 @@ namespace UnityGLTF
 	               material.HasProperty("_LightFactor");
         }
 
+#if UNITY_2019_1_OR_NEWER
+        private static bool CheckForPropertyInShader(Shader shader, string name, ShaderPropertyType type)
+        {
+	        // TODO result can be cached, we might do many similar checks for one export
+
+	        var c = shader.GetPropertyCount();
+	        var foundProperty = false;
+	        for (var i = 0; i < c; i++)
+	        {
+		        if (shader.GetPropertyName(i) == name && shader.GetPropertyType(i) == type)
+		        {
+			        foundProperty = true;
+			        break;
+		        }
+	        }
+	        return foundProperty;
+        }
+#endif
 
 		private void ExportTextureTransform(TextureInfo def, Material mat, string texName)
 		{
@@ -342,13 +364,35 @@ namespace UnityGLTF
 #if UNITY_2021_1_OR_NEWER
 			if (mat.HasFloat(rotProp))
 #else
-			if (mat.HasProperty(rotProp))
+			if (mat.HasProperty(rotProp)
+#if UNITY_2019_1_OR_NEWER
+				&& CheckForPropertyInShader(mat.shader, rotProp, ShaderPropertyType.Float)
+#endif
+			)
 #endif
 				rotation = mat.GetFloat(rotProp);
 
 			if (offset == Vector2.zero && scale == Vector2.one && rotation == 0)
 			{
-				if(mat.HasProperty("_MainTex_ST") || mat.HasProperty("_BaseMap_ST") || mat.HasProperty("_BaseColorMap_ST") || mat.HasProperty("_BaseColorTexture_ST") || mat.HasProperty("baseColorTexture_ST"))
+				var checkForName = texName + "_ST";
+				// Debug.Log("Checking for property: " + checkForName + " : " + mat.HasProperty(checkForName) + " == " + (mat.HasProperty(checkForName) ? mat.GetVector(checkForName) : "null"));
+				var textureHasTilingOffset = mat.HasProperty(checkForName);
+
+#if UNITY_2019_1_OR_NEWER
+				// turns out we have to check extra hard if that property actually exists
+				// the material ALWAYS says true for mat.HasProperty(someTex_ST) when someTex is defined and doesn't have [NoTextureScale] attribute
+				if (textureHasTilingOffset)
+				{
+					if (!CheckForPropertyInShader(mat.shader, checkForName, ShaderPropertyType.Vector))
+						textureHasTilingOffset = false;
+				}
+#endif
+
+				if (textureHasTilingOffset)
+				{
+					// ignore, texture has explicit _ST property
+				}
+				else if(mat.HasProperty("_MainTex_ST") || mat.HasProperty("_BaseMap_ST") || mat.HasProperty("_BaseColorMap_ST") || mat.HasProperty("_BaseColorTexture_ST") || mat.HasProperty("baseColorTexture_ST"))
 				{
 					// difficult choice here: some shaders might support texture transform per-texture, others use the main transform.
 					if (mat.HasProperty("baseColorTexture"))

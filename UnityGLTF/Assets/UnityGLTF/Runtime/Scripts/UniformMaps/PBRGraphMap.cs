@@ -5,9 +5,20 @@ namespace UnityGLTF
 	public class PBRGraphMap : BaseGraphMap, IMetalRoughUniformMap, IVolumeMap, ITransmissionMap, IIORMap, IIridescenceMap, ISpecularMap
 	{
 		private const string PBRGraphGuid = "478ce3626be7a5f4ea58d6b13f05a2e4";
+
 		public PBRGraphMap() : this("UnityGLTF/PBRGraph") {}
 
 		protected PBRGraphMap(string shaderName) : base(shaderName, PBRGraphGuid) { }
+
+#if !UNITY_2021_1_OR_NEWER
+		private const string PBRGraphTransparentGuid = "0a931320a74ca574b91d2d7d4557dcf1";
+		private const string PBRGraphTransparentDoubleGuid = "54352a53405971b41a6587615f947085";
+		private const string PBRGraphDoubleGuid = "8bc739b14fe811644abb82057b363ba8";
+
+		public PBRGraphMap(bool transparent, bool doubleSided) : base(
+			"UnityGLTF/PBRGraph" + (transparent ? "-Transparent" : "") + (doubleSided ? "-Double" : ""),
+			(transparent && doubleSided ? PBRGraphTransparentDoubleGuid : transparent ? PBRGraphTransparentGuid : doubleSided ? PBRGraphDoubleGuid : PBRGraphGuid)) { }
+#endif
 
 		protected PBRGraphMap(Material mat) : base(mat) { }
 

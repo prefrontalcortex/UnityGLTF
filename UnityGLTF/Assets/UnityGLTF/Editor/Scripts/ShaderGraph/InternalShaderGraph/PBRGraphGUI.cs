@@ -5,6 +5,7 @@
 #endif
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using UnityEditor;
@@ -25,7 +26,11 @@ namespace UnityGLTF
 #endif
 	{
 #if UNITY_2021_1_OR_NEWER
-		public override void ValidateMaterial(Material material) => ShaderGraphHelpers.ValidateMaterialKeywords(material);
+		public override void ValidateMaterial(Material material)
+		{
+			base.ValidateMaterial(material);
+			ShaderGraphHelpers.ValidateMaterialKeywords(material);
+		}
 #endif
 
 		protected MaterialEditor materialEditor;
@@ -79,6 +84,9 @@ namespace UnityGLTF
 			Material targetMat = materialEditor.target as Material;
 
 			DrawGameObjectInfo(targetMat);
+#if !UNITY_2021_1_OR_NEWER
+			DrawSurfaceOptions(targetMat);
+#endif
 			_DrawSurfaceInputs(targetMat);
 		}
 #endif
@@ -105,6 +113,55 @@ namespace UnityGLTF
 			}
 			return false;
 		}
+
+#if !UNITY_2021_1_OR_NEWER
+		private static readonly Dictionary<string, string> ShaderNameToGuid = new Dictionary<string, string>()
+		{
+			{ "UnityGLTF/PBRGraph", "478ce3626be7a5f4ea58d6b13f05a2e4" },
+			{ "UnityGLTF/PBRGraph-Transparent", "0a931320a74ca574b91d2d7d4557dcf1" },
+			{ "UnityGLTF/PBRGraph-Transparent-Double", "54352a53405971b41a6587615f947085" },
+			{ "UnityGLTF/PBRGraph-Double", "8bc739b14fe811644abb82057b363ba8" },
+
+			{ "UnityGLTF/UnlitGraph", "59541e6caf586ca4f96ccf48a4813a51" },
+			{ "UnityGLTF/UnlitGraph-Transparent", "83f2caca07949794fb997734c4b0520f" },
+			{ "UnityGLTF/UnlitGraph-Transparent-Double", "8a8841b4fb2f63644896f4e2b36bc06d" },
+			{ "UnityGLTF/UnlitGraph-Double", "33ee70a7f505ddb4e80d235c3d70766d" },
+		};
+
+		private void DrawSurfaceOptions(Material targetMaterial)
+		{
+			EditorGUILayout.Space();
+
+			var shaderName = targetMaterial.shader.name.Replace("Hidden/", "");
+			var isTransparent = shaderName.Contains("-Transparent");
+			var isDoubleSided = shaderName.Contains("-Double");
+			var indexOfDash = shaderName.IndexOf("-", StringComparison.Ordinal);
+			var baseShaderName = indexOfDash < 0 ? shaderName : shaderName.Substring(0, indexOfDash);
+			// EditorGUILayout.LabelField("Shader Name", baseShaderName);
+
+			void SetShader()
+			{
+				var newName = baseShaderName + (isTransparent ? "-Transparent" : "") + (isDoubleSided ? "-Double" : "");
+				Undo.RegisterCompleteObjectUndo(targetMaterial, "Set Material Options");
+				targetMaterial.shader = AssetDatabase.LoadAssetAtPath<Shader>(AssetDatabase.GUIDToAssetPath(ShaderNameToGuid[newName]));
+			}
+
+			var newT = EditorGUILayout.Toggle("Transparent", isTransparent);
+			if (newT != isTransparent)
+			{
+				isTransparent = newT;
+				SetShader();
+			}
+			var newD = EditorGUILayout.Toggle("Double Sided", isDoubleSided);
+			if (newD != isDoubleSided)
+			{
+				isDoubleSided = newD;
+				SetShader();
+			}
+
+			EditorGUILayout.Space();
+		}
+#endif
 
 		private void DrawGameObjectInfo(Material targetMaterial)
 		{
@@ -297,7 +354,11 @@ namespace UnityGLTF
 
 		private static bool HasPropertyButNoTex(Material targetMaterial, string name)
 		{
-			return targetMaterial.HasProperty(name) && !targetMaterial.GetTexture(name);
+			return targetMaterial.HasProperty(name) &&
+			       #if UNITY_2021_2_OR_NEWER
+			       targetMaterial.HasTexture(name) &&
+			       #endif
+			       !targetMaterial.GetTexture(name);
 		}
 
 		private void DrawProperties(Material targetMaterial, MaterialProperty[] properties)
@@ -308,9 +369,19 @@ namespace UnityGLTF
 			{
 				propertyList.RemoveAll(x => x.name.EndsWith("_ST", StringComparison.Ordinal) || x.name.EndsWith("Rotation", StringComparison.Ordinal));
 			}
+			// want to remove the _ST properties since they are drawn inline already on 2021.2+
+			#if UNITY_2021_2_OR_NEWER
+			{
+				propertyList.RemoveAll(x => x.name.EndsWith("_ST", StringComparison.Ordinal));
+			}
+			#endif
 			if (!targetMaterial.IsKeywordEnabled("_VOLUME_TRANSMISSION_ON"))
 			{
-				propertyList.RemoveAll(x => x.name.StartsWith("thickness", StringComparison.Ordinal) || x.name.StartsWith("attenuation", StringComparison.Ordinal) || x.name.StartsWith("transmission", StringComparison.Ordinal));
+				propertyList.RemoveAll(x => x.name.StartsWith("transmission", StringComparison.Ordinal));
+			}
+			if (!targetMaterial.HasProperty("_VOLUME_ON") || !(targetMaterial.GetFloat("_VOLUME_ON") > 0.5f))
+			{
+				propertyList.RemoveAll(x => x.name.StartsWith("thickness", StringComparison.Ordinal) || x.name.StartsWith("attenuation", StringComparison.Ordinal));
 			}
 			if (!targetMaterial.IsKeywordEnabled("_IRIDESCENCE_ON"))
 			{
