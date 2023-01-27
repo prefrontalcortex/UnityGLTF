@@ -108,7 +108,7 @@ namespace GLTF.Extensions
 						Root = root
 					}
 				};
-				if (textureObject.ContainsKey(TextureInfo.TEXCOORD))
+				if (textureObject[TextureInfo.TEXCOORD] != null)
 				{
 					textureInfo.TexCoord = textureObject[TextureInfo.TEXCOORD].DeserializeAsInt();
 				}
@@ -124,7 +124,7 @@ namespace GLTF.Extensions
 			{
 				var normalTex = new NormalTextureInfo() { Index = tex.Index, TexCoord = tex.TexCoord };
 				JObject textureObject = token as JObject;
-				if (textureObject.ContainsKey(NormalTextureInfo.SCALE))
+				if (textureObject[NormalTextureInfo.SCALE] != null)
 				{
 					normalTex.Scale = textureObject[NormalTextureInfo.SCALE].DeserializeAsDouble();
 				}
