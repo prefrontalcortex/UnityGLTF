@@ -101,6 +101,7 @@ namespace GLTF.Schema
 					foreach (MeshPrimitive mp in mesh.Primitives)
 					{
 						if (mp == null) continue;
+						if(mp.Targets == null || mp.Targets.Count != mesh.TargetNames.Count) throw new GLTFParseException("Invalid number of morphtarget names on mesh!");
 						mp.TargetNames = mesh.TargetNames;
 					}
 				}
