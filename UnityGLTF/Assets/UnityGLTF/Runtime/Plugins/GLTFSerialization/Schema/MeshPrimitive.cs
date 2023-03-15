@@ -219,7 +219,7 @@ namespace GLTF.Schema
 							skipStartObjectRead: true);
 						});
 						break;
-					case "extras":
+					/*case "extras":
 						// GLTF does not support morph target names, serialize in extras for now
 						// https://github.com/KhronosGroup/glTF/issues/1036
 						if (reader.Read() && reader.TokenType == JsonToken.StartObject)
@@ -236,11 +236,38 @@ namespace GLTF.Schema
 							}
 						}
 
-						break;
+						break;*/
 					default:
 						primitive.DefaultPropertyDeserializer(root, reader);
 						break;
 				}
+			}
+			
+			// GLTF does not support morph target names, serialize in extras for now
+			// https://github.com/KhronosGroup/glTF/issues/1036
+			if (primitive.Extras != null)
+			{
+				var extrasReader = primitive.Extras.CreateReader();
+				extrasReader.Read();
+
+				while (extrasReader.Read() && extrasReader.TokenType == JsonToken.PropertyName)
+				{
+					var extraProperty = extrasReader.Value.ToString();
+					switch (extraProperty)
+					{
+						case "targetNames":
+							primitive.TargetNames = extrasReader.ReadStringList();
+							break;
+						default:
+							extrasReader.Skip();
+							break;
+					}
+				}
+
+				extrasReader.Close();
+
+				if (primitive.TargetNames != null && primitive.TargetNames.Count > 0 && (primitive.Targets == null || primitive.Targets.Count != primitive.TargetNames.Count))
+					throw new GLTFParseException("Invalid number of morphtarget names on primitive!");
 			}
 
 			return primitive;

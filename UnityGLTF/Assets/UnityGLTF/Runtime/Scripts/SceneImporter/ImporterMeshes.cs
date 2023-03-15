@@ -150,15 +150,29 @@ namespace UnityGLTF
 
 			if (unityMeshData.MorphTargetVertices != null)
 			{
-				var firstPrim = _gltfRoot.Meshes[meshIndex].Primitives[0];
-				for (int i = 0; i < firstPrim.Targets.Count; i++)
-				{
-					var targetName = firstPrim.TargetNames != null ? firstPrim.TargetNames[i] : $"Morphtarget{i}";
-					mesh.AddBlendShapeFrame(targetName, 100,
-						unityMeshData.MorphTargetVertices[i],
-						unityMeshData.MorphTargetNormals != null ? unityMeshData.MorphTargetNormals[i] : null,
-						unityMeshData.MorphTargetTangents != null ? unityMeshData.MorphTargetTangents[i] : null
-					);
+				if(_gltfRoot.Meshes[meshIndex].TargetNames != null && _gltfRoot.Meshes[meshIndex].TargetNames.Count > 0)
+				{	// Get target names from mesh extras
+					for (int i = 0; i < _gltfRoot.Meshes[meshIndex].TargetNames.Count; i++)
+					{
+						var targetName = _gltfRoot.Meshes[meshIndex].TargetNames[i] != null && _gltfRoot.Meshes[meshIndex].TargetNames[i].Length > 0 ? _gltfRoot.Meshes[meshIndex].TargetNames[i] : $"Morphtarget{i}";
+						mesh.AddBlendShapeFrame(targetName, 100,
+							unityMeshData.MorphTargetVertices[i],
+							unityMeshData.MorphTargetNormals != null ? unityMeshData.MorphTargetNormals[i] : null,
+							unityMeshData.MorphTargetTangents != null ? unityMeshData.MorphTargetTangents[i] : null
+						);
+					}
+				} else {
+					// Get target names from first primitive's extras
+					var firstPrim = _gltfRoot.Meshes[meshIndex].Primitives[0];
+					for (int i = 0; i < firstPrim.Targets.Count; i++)
+					{
+						var targetName = firstPrim.TargetNames != null ? firstPrim.TargetNames[i] : $"Morphtarget{i}";
+						mesh.AddBlendShapeFrame(targetName, 100,
+							unityMeshData.MorphTargetVertices[i],
+							unityMeshData.MorphTargetNormals != null ? unityMeshData.MorphTargetNormals[i] : null,
+							unityMeshData.MorphTargetTangents != null ? unityMeshData.MorphTargetTangents[i] : null
+						);
+					}
 				}
 			}
 			await YieldOnTimeoutAndThrowOnLowMemory();
