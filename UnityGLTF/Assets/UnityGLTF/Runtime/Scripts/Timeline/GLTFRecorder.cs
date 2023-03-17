@@ -54,6 +54,7 @@ namespace UnityGLTF.Timeline
 			private bool inWorldSpace = false;
 			private bool recordAnimationPointer;
 
+			internal Bounds bounds;
 #if USE_ANIMATION_POINTER
 			private static List<ExportPlan> exportPlans;
 			private static MaterialPropertyBlock materialPropertyBlock = new MaterialPropertyBlock();
@@ -82,6 +83,11 @@ namespace UnityGLTF.Timeline
 			}
 #endif
 
+			private void UpdateBounds(Vector3 worldPos)
+			{
+				bounds.Encapsulate(worldPos);
+			}
+
 			public AnimationData(Transform tr, double time, bool zeroScale = false, bool recordBlendShapes = true, bool inWorldSpace = false, bool recordAnimationPointer = false)
 			{
 				this.tr = tr;
@@ -90,10 +96,16 @@ namespace UnityGLTF.Timeline
 				this.inWorldSpace = inWorldSpace;
 				this.recordAnimationPointer = recordAnimationPointer;
 
+				bounds = new Bounds(  tr.position, Vector3.zero);
+
 				if (exportPlans == null)
 				{
 					exportPlans = new List<ExportPlan>();
-					exportPlans.Add(new ExportPlan("translation", typeof(Vector3), x => x, (tr0, _, options) => options.inWorldSpace ? tr0.position : tr0.localPosition));
+					exportPlans.Add(new ExportPlan("translation", typeof(Vector3), x => x, (tr0, _, options) =>
+					{
+						UpdateBounds(tr0.position);
+						return options.inWorldSpace ? tr0.position : tr0.localPosition;
+					}));
 					exportPlans.Add(new ExportPlan("rotation", typeof(Quaternion), x => x, (tr0, _, options) =>
 					{
 						var q = options.inWorldSpace ? tr0.rotation : tr0.localRotation;
@@ -310,6 +322,9 @@ namespace UnityGLTF.Timeline
 
 			CollectAndProcessAnimation(exporter, anim, addBoundsMarkerNodes, out Bounds translationBounds);
 
+			foreach (var t in data)
+				Debug.Log("T: "+t.Key.name+"  : " + t.Value.bounds.center + "   " + t.Value.bounds.extents.ToString());
+
 			if (addBoundsMarkerNodes)
 			{
 				Debug.Log("Animation bounds: " + translationBounds.center + " => " + translationBounds.size);
@@ -341,6 +356,8 @@ namespace UnityGLTF.Timeline
 					cubeInstance.transform.position = point;
 					cubeInstance.transform.parent = boundsRoot.transform;
 				}
+				if (!recordRootInWorldSpace)
+					boundsRoot.transform.localPosition = Vector3.zero;
 
 				// export and add explicitly to the scene list, otherwise these nodes at the root level will be ignored
 				var nodeId = exporter.ExportNode(boundsRoot);
@@ -380,28 +397,26 @@ namespace UnityGLTF.Timeline
 			foreach (var kvp in data)
 			{
 				processAnimationMarker.Begin();
+
+				if (calculateTranslationBounds)
+				{
+					if (!gotFirstValue)
+					{
+						translationBounds = kvp.Value.bounds;
+						gotFirstValue = true;
+					}
+					else
+					{
+						translationBounds.Encapsulate(kvp.Value.bounds);
+					}
+				}
+
 				foreach (var tr in kvp.Value.tracks)
 				{
 					if (tr.times.Length == 0) continue;
 					var times = tr.times;
 					var values = tr.values;
 
-					if (calculateTranslationBounds && tr.propertyName == "translation")
-					{
-						for (var i = 0; i < values.Length; i++)
-						{
-							var vec = (Vector3) values[i];
-							if (!gotFirstValue)
-							{
-								translationBounds = new Bounds(vec, Vector3.zero);
-								gotFirstValue = true;
-							}
-							else
-							{
-								translationBounds.Encapsulate(vec);
-							}
-						}
-					}
 
 					gltfSceneExporter.RemoveUnneededKeyframes(ref times, ref values);
 					gltfSceneExporter.AddAnimationData(tr.animatedObject, tr.propertyName, anim, times, values);
