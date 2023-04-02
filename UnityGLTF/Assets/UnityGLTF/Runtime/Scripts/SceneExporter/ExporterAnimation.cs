@@ -905,7 +905,26 @@ namespace UnityGLTF
 							for (var index = 0; index < objectKeys.Length; index++)
 							{
 								var objectKey = objectKeys[index];
-								var spriteIndex = objectKeys[index].value ? Array.IndexOf(sprites, objectKeys[index].value) : 0;
+								var spriteAsset = objectKey.value;
+								var spriteIndex = spriteAsset ? Array.IndexOf(sprites, spriteAsset) : 0;
+
+								foreach (var res in pointerResolvers)
+								{
+									var resolvedPath = "";
+									if (res.TryResolve(spriteAsset, ref resolvedPath))
+									{
+										if (resolvedPath != null)
+										{
+											var lastSlash = resolvedPath.LastIndexOf('/');
+											if (lastSlash >= 0)
+												resolvedPath = resolvedPath.Substring(lastSlash + 1);
+											if (int.TryParse(resolvedPath, out var resolvedIndex))
+												spriteIndex = resolvedIndex;
+											break;
+										}
+									}
+								}
+
 								var kf = new Keyframe(objectKey.time, spriteIndex);
 
 								// create intermediate keyframe to make sure we dont have interpolation between sprites
