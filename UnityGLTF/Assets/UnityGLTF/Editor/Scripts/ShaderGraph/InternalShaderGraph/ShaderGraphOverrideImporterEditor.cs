@@ -1,12 +1,13 @@
 #if !NO_INTERNALS_ACCESS && UNITY_2020_1_OR_NEWER
 
+using UnityEditor;
 #if UNITY_2020_2_OR_NEWER
 using UnityEditor.AssetImporters;
 #else
 using UnityEditor.Experimental.AssetImporters;
 #endif
 
-namespace UnityEditor
+namespace UnityGLTF
 {
 	[CustomEditor(typeof(ShaderGraphOverrideImporter))]
 	class ShaderGraphOverrideImporterEditor : ScriptedImporterEditor
@@ -17,7 +18,6 @@ namespace UnityEditor
 			EditorGUILayout.HelpBox("Deprecated. Use material overrides on UnityGLTF/PBRGraph and UnityGLTF/UnlitGraph instead of separate shaders.", MessageType.Warning);
 #endif
 			DrawDefaultInspector();
-
 			ApplyRevertGUI();
 		}
 	}

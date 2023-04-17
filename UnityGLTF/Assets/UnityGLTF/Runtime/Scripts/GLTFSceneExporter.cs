@@ -189,7 +189,7 @@ namespace UnityGLTF
 				case TextureMapType.MetallicRoughness:
 					exportSettings.linear = true;
 					exportSettings.alphaMode = TextureExportSettings.AlphaMode.Never;
-					break;
+					return exportSettings;
 
 				case TextureMapType.SpecGloss: // SpecGloss = MetallicGloss; // not really supported anymore
 					exportSettings.linear = true;
@@ -891,6 +891,9 @@ namespace UnityGLTF
 
 		private NodeId ExportNode(Transform nodeTransform)
 		{
+			if (_exportedTransforms.TryGetValue(nodeTransform.GetInstanceID(), out var existingNodeId))
+				return new NodeId() { Id = existingNodeId, Root = _root };
+
 			exportNodeMarker.Begin();
 
 			var node = new Node();

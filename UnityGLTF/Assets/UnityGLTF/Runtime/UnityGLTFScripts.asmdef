@@ -6,7 +6,8 @@
         "Unity.Timeline",
         "Ktx",
         "UnityGLTF.Helpers",
-        "Unity.InputSystem"
+        "Unity.InputSystem",
+        "Unity.Animation.Rigging"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

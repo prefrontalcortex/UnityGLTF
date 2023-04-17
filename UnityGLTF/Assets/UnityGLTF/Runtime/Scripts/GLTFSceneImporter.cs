@@ -47,7 +47,8 @@ namespace UnityGLTF
 	{
 		None,
 		Legacy,
-		Mecanim
+		Mecanim,
+		MecanimHumanoid,
 	}
 
 	public class UnityMeshData
@@ -172,6 +173,11 @@ namespace UnityGLTF
 		public GameObject CreatedObject { get; private set; }
 
 		/// <summary>
+		/// All created animation clips
+		/// </summary>
+		public AnimationClip[] CreatedAnimationClips { get; private set; }
+
+		/// <summary>
 		/// Adds colliders to primitive objects when created
 		/// </summary>
 		public ColliderType Collider { get; set; }
@@ -210,7 +216,7 @@ namespace UnityGLTF
 		public bool GenerateMipMapsForTextures = true;
 
 		/// <summary>
-		/// When screen coverage is above threashold and no LOD mesh cull the object
+		/// When screen coverage is above threshold and no LOD mesh, cull the object
 		/// </summary>
 		public bool CullFarLOD = false;
 
@@ -586,11 +592,11 @@ namespace UnityGLTF
 			return _assetCache.BufferCache[bufferId.Id];
 		}
 
-		private float GetLodCoverage(List<double> lodcoverageExtras, int lodIndex)
+		private float GetLodCoverage(List<double> lodCoverageExtras, int lodIndex)
 		{
-			if (lodcoverageExtras != null && lodIndex < lodcoverageExtras.Count)
+			if (lodCoverageExtras != null && lodIndex < lodCoverageExtras.Count)
 			{
-				return (float)lodcoverageExtras[lodIndex];
+				return (float)lodCoverageExtras[lodIndex];
 			}
 			else
 			{
@@ -622,6 +628,24 @@ namespace UnityGLTF
 					}
 
 					await ConstructNode(node, nodeId, cancellationToken);
+
+					// HACK belongs in an extension, but we don't have Importer callbacks yet
+					const string msft_LODExtName = MSFT_LODExtensionFactory.EXTENSION_NAME;
+					if (_gltfRoot.ExtensionsUsed != null
+					    && _gltfRoot.ExtensionsUsed.Contains(msft_LODExtName)
+					    && node.Extensions != null
+					    && node.Extensions.ContainsKey(msft_LODExtName))
+					{
+						var lodsExtension = node.Extensions[msft_LODExtName] as MSFT_LODExtension;
+						if (lodsExtension != null && lodsExtension.NodeIds.Count > 0)
+						{
+							for (int i = 0; i < lodsExtension.NodeIds.Count; i++)
+							{
+								int lodNodeId = lodsExtension.NodeIds[i];
+								await GetNode(lodNodeId, cancellationToken);
+							}
+						}
+					}
 				}
 
 				return _assetCache.NodeCache[nodeId];
@@ -676,55 +700,6 @@ namespace UnityGLTF
 				}
 			}
 
-			const string msft_LODExtName = MSFT_LODExtensionFactory.EXTENSION_NAME;
-			MSFT_LODExtension lodsextension = null;
-			if (_gltfRoot.ExtensionsUsed != null
-				&& _gltfRoot.ExtensionsUsed.Contains(msft_LODExtName)
-				&& node.Extensions != null
-				&& node.Extensions.ContainsKey(msft_LODExtName))
-			{
-				lodsextension = node.Extensions[msft_LODExtName] as MSFT_LODExtension;
-				if (lodsextension != null && lodsextension.MeshIds.Count > 0)
-				{
-					int lodCount = lodsextension.MeshIds.Count + 1;
-					if (!CullFarLOD)
-					{
-						//create a final lod with the mesh as the last LOD in file
-						lodCount += 1;
-					}
-					LOD[] lods = new LOD[lodsextension.MeshIds.Count + 2];
-					List<double> lodCoverage = lodsextension.GetLODCoverage(node);
-
-					var lodGroupNodeObj = new GameObject(string.IsNullOrEmpty(node.Name) ? ("GLTFNode_LODGroup" + nodeIndex) : node.Name);
-					lodGroupNodeObj.SetActive(false);
-					nodeObj.transform.SetParent(lodGroupNodeObj.transform, false);
-					MeshRenderer[] childRenders = nodeObj.GetComponentsInChildren<MeshRenderer>();
-					lods[0] = new LOD(GetLodCoverage(lodCoverage, 0), childRenders);
-
-					LODGroup lodGroup = lodGroupNodeObj.AddComponent<LODGroup>();
-					for (int i = 0; i < lodsextension.MeshIds.Count; i++)
-					{
-						int lodNodeId = lodsextension.MeshIds[i];
-						var lodNodeObj = await GetNode(lodNodeId, cancellationToken);
-						lodNodeObj.transform.SetParent(lodGroupNodeObj.transform, false);
-						childRenders = lodNodeObj.GetComponentsInChildren<MeshRenderer>();
-						int lodIndex = i + 1;
-						lods[lodIndex] = new LOD(GetLodCoverage(lodCoverage, lodIndex), childRenders);
-					}
-
-					if (!CullFarLOD)
-					{
-						//use the last mesh as the LOD
-						lods[lodsextension.MeshIds.Count + 1] = new LOD(0, childRenders);
-					}
-
-					lodGroup.SetLODs(lods);
-					lodGroup.RecalculateBounds();
-					lodGroupNodeObj.SetActive(true);
-					_assetCache.NodeCache[nodeIndex] = lodGroupNodeObj;
-				}
-			}
-
 			if (node.Mesh != null)
 			{
 				var mesh = node.Mesh.Value;
@@ -754,8 +729,8 @@ namespace UnityGLTF
 					{
 						for (int i = 0; i < weights.Count; ++i)
 						{
-							// GLTF weights are [0, 1] range but Unity weights are [0, 100] range
-							renderer.SetBlendShapeWeight(i, (float)(weights[i] * 100));
+							// GLTF weights are [0, 1] range; Unity weights must match the frame weight
+							renderer.SetBlendShapeWeight(i, (float)(weights[i] * 1f));
 						}
 					}
 				}
@@ -787,6 +762,9 @@ namespace UnityGLTF
 				}
 #endif
 			}
+
+			await ConstructLods(_gltfRoot, nodeObj, node, nodeIndex, cancellationToken);
+
 			/* TODO: implement camera (probably a flag to disable for VR as well)
 			if (camera != null)
 			{
@@ -821,24 +799,6 @@ namespace UnityGLTF
 				foreach (NodeId child in node.Children)
 				{
 					await ConstructBufferData(child.Value, cancellationToken);
-				}
-			}
-
-			const string msft_LODExtName = MSFT_LODExtensionFactory.EXTENSION_NAME;
-			MSFT_LODExtension lodsextension = null;
-			if (_gltfRoot.ExtensionsUsed != null
-				&& _gltfRoot.ExtensionsUsed.Contains(msft_LODExtName)
-				&& node.Extensions != null
-				&& node.Extensions.ContainsKey(msft_LODExtName))
-			{
-				lodsextension = node.Extensions[msft_LODExtName] as MSFT_LODExtension;
-				if (lodsextension != null && lodsextension.MeshIds.Count > 0)
-				{
-					for (int i = 0; i < lodsextension.MeshIds.Count; i++)
-					{
-						int lodNodeId = lodsextension.MeshIds[i];
-						await ConstructBufferData(_gltfRoot.Nodes[lodNodeId], cancellationToken);
-					}
 				}
 			}
 		}
@@ -931,7 +891,7 @@ namespace UnityGLTF
 								}
 							}
 						}
-						else if (_options.AnimationMethod == AnimationMethod.Mecanim)
+						else if (_options.AnimationMethod == AnimationMethod.Mecanim || _options.AnimationMethod == AnimationMethod.MecanimHumanoid)
 						{
 							Animator animator = sceneObj.AddComponent<Animator>();
 #if UNITY_EDITOR
@@ -953,7 +913,14 @@ namespace UnityGLTF
 #else
 						Debug.Log(LogType.Warning, "glTF scene contains animations but com.unity.modules.animation isn't installed. Install that module to import animations.");
 #endif
+						CreatedAnimationClips = constructedClips.ToArray();
 					}
+				}
+
+				if (_options.AnimationMethod == AnimationMethod.MecanimHumanoid)
+				{
+					if (!sceneObj.GetComponent<Animator>())
+						sceneObj.AddComponent<Animator>();
 				}
 
 				CreatedObject = sceneObj;

@@ -6,7 +6,6 @@
 #define ANIMATION_SUPPORTED
 #endif
 
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -14,6 +13,7 @@ using UnityEngine;
 using UnityEngine.Animations;
 using UnityEngine.Playables;
 using UnityGLTF.Timeline;
+
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -23,23 +23,31 @@ namespace UnityGLTF
 	public partial class GLTFSceneExporter
 	{
 #if ANIMATION_SUPPORTED
-		internal void CollectClipCurvesForHumanoid(GameObject root, AnimationClip clip, Dictionary<string, TargetCurveSet> targetCurves)
+		internal void CollectClipCurvesBySampling(GameObject root, AnimationClip clip, Dictionary<string, TargetCurveSet> targetCurves)
 		{
-			if (!clip.humanMotion) return;
-
 			var recorder = new GLTFRecorder(root.transform, false, false, false);
 
-			// var playableGraph = PlayableGraph.Create();
-			// var playableOutput = AnimationPlayableOutput.Create(playableGraph, "Animation", animator);
+			var playableGraph = PlayableGraph.Create();
+			var animationClipPlayable = (Playable) AnimationClipPlayable.Create(playableGraph, clip);
 
-			// Wrap the clip in a playable
-			// var animationClipPlayable = AnimationClipPlayable.Create(playableGraph, clip);
+			var rigs = root.GetComponents<IAnimationWindowPreview>();
+			if (rigs != null)
+			{
+				foreach (var rig in rigs)
+				{
+					rig.StopPreview(); // seems to be needed in some cases because the Rig isn't properly marked as non-initialized by Unity
+					rig.StartPreview();
+					animationClipPlayable = rig.BuildPreviewGraph(playableGraph, animationClipPlayable); // modifies the playable to include Animation Rigging data
+				}
+			}
+			else
+			{
+				rigs = System.Array.Empty<IAnimationWindowPreview>();
+			}
 
-			// Connect the Playable to an output
-			// playableOutput.SetSourcePlayable(animationClipPlayable);
-
-			// Plays the Graph.
-			// playableGraph.SetTimeUpdateMode(DirectorUpdateMode.Manual);
+			var playableOutput = AnimationPlayableOutput.Create(playableGraph, "Animation", root.GetComponent<Animator>());
+			playableOutput.SetSourcePlayable(animationClipPlayable);
+			playableGraph.SetTimeUpdateMode(DirectorUpdateMode.Manual);
 
 			var timeStep = 1.0f / 30.0f;
 			var length = clip.length;
@@ -56,29 +64,60 @@ namespace UnityGLTF
 #endif
 			AnimationMode.BeginSampling();
 
+			// if this is a Prefab, we need to collect property modifications here to work around
+			// limitations of AnimationMode - otherwise prefab modifications will persist...
+			var isPrefabAsset = PrefabUtility.IsPartOfPrefabAsset(root);
+			var prefabModifications = isPrefabAsset ? PrefabUtility.GetPropertyModifications(root) : default;
+			Undo.RegisterFullObjectHierarchyUndo(root, "Animation Sampling");
+
 			// add the root since we need to shift it around -
 			// it will be reset when exiting AnimationMode again and will not be dirty.
 			AnimationMode_AddTransformTRS(root);
 
-			root.transform.localPosition = Vector3.zero;
-			root.transform.localRotation = Quaternion.identity;
-			// root.transform.localScale = Vector3.one;
+			// TODO not entirely sure if only checking for humanMotion here is correct
+			if (clip.isHumanMotion)
+			{
+				root.transform.localPosition = Vector3.zero;
+				root.transform.localRotation = Quaternion.identity;
+				// root.transform.localScale = Vector3.one;
+			}
 
 			// first frame
-			AnimationMode.SampleAnimationClip(root, clip, time);
+			foreach (var rig in rigs) rig.UpdatePreviewGraph(playableGraph);
+			AnimationMode.SamplePlayableGraph(playableGraph, 0, time);
+
+			// for Animation Rigging its often desired to have one complete loop first, so we need to prewarm to have a nice exportable animation
+			var prewarm = rigs.Length > 0 && clip.isLooping;
+			if (prewarm)
+			{
+				while (time + timeStep < length)
+				{
+					time += timeStep;
+					foreach (var rig in rigs) rig.UpdatePreviewGraph(playableGraph);
+					AnimationMode.SamplePlayableGraph(playableGraph, 0, time);
+				}
+
+				// reset time to the start
+				time = 0;
+			}
+
 			recorder.StartRecording(time);
 
 			while (time + timeStep < length)
 			{
 				time += timeStep;
-				AnimationMode.SampleAnimationClip(root, clip, time);
+				foreach (var rig in rigs) rig.UpdatePreviewGraph(playableGraph);
+				AnimationMode.SamplePlayableGraph(playableGraph, 0, time);
 				recorder.UpdateRecording(time);
 			}
 
 			// last frame
 			time = length;
-			AnimationMode.SampleAnimationClip(root, clip, time);
+			foreach (var rig in rigs) rig.UpdatePreviewGraph(playableGraph);
+			AnimationMode.SamplePlayableGraph(playableGraph, 0, time);
 			recorder.UpdateRecording(time);
+
+			foreach (var rig in rigs) rig.StopPreview();
 
 			AnimationMode.EndSampling();
 #if UNITY_2020_1_OR_NEWER
@@ -86,6 +125,16 @@ namespace UnityGLTF
 #else
 			AnimationMode.StopAnimationMode();
 #endif
+
+			// reset prefab modifications if this was a prefab asset
+			if (isPrefabAsset) {
+				PrefabUtility.SetPropertyModifications(root, prefabModifications);
+			}
+
+			// seems to be necessary because the animation sampling API doesn't fully work;
+			// sometimes samples still "leak" into property modifications
+			Undo.FlushUndoRecordObjects();
+			Undo.PerformUndo();
 
 			recorder.EndRecording(out var data);
 			if (data == null || !data.Any()) return;

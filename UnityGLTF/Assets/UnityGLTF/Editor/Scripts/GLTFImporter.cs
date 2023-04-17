@@ -75,11 +75,16 @@ namespace UnityGLTF
         [SerializeField] internal GLTFImporterNormals _importNormals = GLTFImporterNormals.Import;
         [SerializeField] internal GLTFImporterNormals _importTangents = GLTFImporterNormals.Import;
         [SerializeField] internal AnimationMethod _importAnimations = AnimationMethod.Mecanim;
+        [SerializeField] internal bool _addAnimatorComponent = false;
         [SerializeField] internal bool _animationLoopTime = true;
         [SerializeField] internal bool _animationLoopPose = false;
         [SerializeField] internal bool _importMaterials = true;
         [Tooltip("Enable this to get the same main asset identifiers as glTFast uses. This is recommended for new asset imports. Note that changing this for already imported assets will break their scene references and require manually re-adding the affected assets.")]
         [SerializeField] internal bool _useSceneNameIdentifier = false;
+
+        // for humanoid importer
+        [SerializeField] internal bool m_OptimizeGameObjects = false;
+        [SerializeField] internal HumanDescription m_HumanDescription = new HumanDescription();
 
         // material remapping
         [SerializeField] private Material[] m_Materials = new Material[0];
@@ -111,11 +116,43 @@ namespace UnityGLTF
 
         internal List<TextureInfo> Textures => _textures;
 
+        private static string[] GatherDependenciesFromSourceFile(string path)
+        {
+	        // only supported glTF for now - would be harder to check for external references in glb assets.
+	        if (!path.ToLowerInvariant().EndsWith(".gltf")) return Array.Empty<string>();
+
+	        var dependencies = new List<string>();
+
+	        // read minimal JSON, check if there's a bin buffer, and load that.
+	        // all other assets should be "proper assets" and be found by the asset database, but we're not importing .bin
+	        // since it's too common as a file type.
+	        var gltf = GLTFRoot.Deserialize(new StreamReader(path));
+	        var externalBuffers = gltf?.Buffers?.Where(b => b?.Uri != null && b.Uri.ToLowerInvariant().EndsWith(".bin"));
+	        if (externalBuffers != null)
+	        {
+		        var dir = Path.GetDirectoryName(path);
+		        foreach (var buffer in externalBuffers)
+		        {
+			        var uri = buffer.Uri;
+			        if (!File.Exists(Path.Combine(dir, uri)))
+				        uri = Uri.UnescapeDataString(uri);
+			        if (File.Exists(Path.Combine(dir, uri)))
+						dependencies.Add(Path.Combine(dir, uri));
+			        // TODO check if inside the project/any package, could be an absolute path
+			        else if (File.Exists(uri))
+				        dependencies.Add(uri);
+		        }
+	        }
+
+	        return dependencies.ToArray();
+        }
+
         public override void OnImportAsset(AssetImportContext ctx)
         {
             string sceneName = null;
             GameObject gltfScene = null;
-            UnityEngine.Mesh[] meshes = null;
+            AnimationClip[] animations = null;
+            Mesh[] meshes = null;
 
             var uniqueNames = new List<string>() { "main asset" };
             EnsureShadersAreLoaded();
@@ -127,10 +164,23 @@ namespace UnityGLTF
 	            return uniqueName;
             }
 
+#if UNITY_2017_3_OR_NEWER
+            // We explicitly turn the new identifier on for new imports, that is, when no meta file existed before this import.
+            // We do this early, so that when imports fail, we still get the new identifier. Unity already sets import settings on failed imports.
+            if (!_useSceneNameIdentifier)
+            {
+	            var importer = GetAtPath(ctx.assetPath);
+	            if (importer.importSettingsMissing)
+	            {
+		            _useSceneNameIdentifier = true;
+	            }
+            }
+#endif
+
             try
             {
                 sceneName = Path.GetFileNameWithoutExtension(ctx.assetPath);
-                gltfScene = CreateGLTFScene(ctx.assetPath);
+                CreateGLTFScene(ctx.assetPath, out gltfScene, out animations);
                 var rootGltfComponent = gltfScene.GetComponent<InstantiatedGLTFObject>();
                 if (rootGltfComponent) DestroyImmediate(rootGltfComponent);
 
@@ -138,6 +188,12 @@ namespace UnityGLTF
                 if (_removeEmptyRootObjects)
                 {
                     var t = gltfScene.transform;
+                    var existingAnimator = t.GetComponent<Animator>();
+                    var hadAnimator = (bool)existingAnimator;
+                    var existingAvatar = existingAnimator ? existingAnimator.avatar : default;
+                    if (existingAnimator)
+	                    DestroyImmediate(existingAnimator);
+
                     while (
                         gltfScene.transform.childCount == 1 &&
                         gltfScene.GetComponents<Component>().Length == 1)
@@ -150,6 +206,13 @@ namespace UnityGLTF
                         t.parent = null; // To keep transform information in the new parent
                         DestroyImmediate(parent); // Get rid of the parent
                     }
+
+                    // Re-add animator if it was removed
+                    if (hadAnimator)
+					{
+	                    var newAnimator = gltfScene.AddComponent<Animator>();
+	                    newAnimator.avatar = existingAvatar;
+					}
                 }
 
                 // Ensure there are no hide flags present (will cause problems when saving)
@@ -195,14 +258,19 @@ namespace UnityGLTF
                     if (_generateLightmapUVs)
                     {
 	                    var uv2 = mesh.uv2;
-	                    if(uv2 == null || uv2.Length < 1)
+	                    if (uv2 == null || uv2.Length < 1)
 	                    {
+		                    var hasTriangleTopology = true;
+		                    for (var i = 0; i < mesh.subMeshCount; i++)
+								hasTriangleTopology &= mesh.GetTopology(i) == MeshTopology.Triangles;
+
 		                    // uv2 = Unwrapping.GeneratePerTriangleUV(mesh);
 		                    // mesh.SetUVs(1, uv2);
 
 		                    // There seems to be a bug in Unity's splitting code:
 		                    // for some meshes, the result is broken after splitting.
-		                    Unwrapping.GenerateSecondaryUVSet(mesh);
+		                    if (hasTriangleTopology)
+								Unwrapping.GenerateSecondaryUVSet(mesh);
 	                    }
                     }
                     if (_swapUvs)
@@ -218,14 +286,14 @@ namespace UnityGLTF
                         mesh.normals = new Vector3[0];
                     else if (_importNormals == GLTFImporterNormals.Calculate && mesh.GetTopology(0) == MeshTopology.Triangles)
                         mesh.RecalculateNormals();
-                    else if (_importNormals == GLTFImporterNormals.Import && mesh.normals.Length == 0)
+                    else if (_importNormals == GLTFImporterNormals.Import && mesh.normals.Length == 0 && mesh.GetTopology(0) == MeshTopology.Triangles)
 	                    mesh.RecalculateNormals();
 
 					if (_importTangents == GLTFImporterNormals.None)
 						mesh.tangents = new Vector4[0];
 					else if (_importTangents == GLTFImporterNormals.Calculate && mesh.GetTopology(0) == MeshTopology.Triangles)
 						mesh.RecalculateTangents();
-					else if (_importTangents == GLTFImporterNormals.Import && mesh.tangents.Length == 0)
+					else if (_importTangents == GLTFImporterNormals.Import && mesh.tangents.Length == 0 && mesh.GetTopology(0) == MeshTopology.Triangles)
 						mesh.RecalculateTangents();
 
 					mesh.UploadMeshData(!_readWriteEnabled);
@@ -239,19 +307,14 @@ namespace UnityGLTF
                     return mesh;
                 }).Where(x => x).ToArray();
 
-                var animations = gltfScene.GetComponentsInChildren<Animation>();
-                var clips = animations.SelectMany(x => AnimationUtility.GetAnimationClips(x.gameObject));
-                foreach (var clip in clips)
+                if (animations != null)
                 {
-	                ctx.AddObjectToAsset(GetUniqueName(clip.name), clip);
+	                foreach (var clip in animations)
+	                {
+		                ctx.AddObjectToAsset(GetUniqueName(clip.name), clip);
+	                }
                 }
 
-                var animators = gltfScene.GetComponentsInChildren<Animator>();
-                var clips2 = animators.SelectMany(x => AnimationUtility.GetAnimationClips(x.gameObject));
-                foreach (var clip in clips2)
-                {
-	                ctx.AddObjectToAsset(GetUniqueName(clip.name), clip);
-                }
                 // we can't add the Animators as subassets here, since they require their state machines to be direct subassets themselves.
                 // foreach (var anim in animators)
                 // {
@@ -261,6 +324,13 @@ namespace UnityGLTF
 		        //         ctx.AddObjectToAsset(GetUniqueName(layer.name + "-state"), layer.stateMachine);
 	            //     }
                 // }
+
+                if (_importAnimations == AnimationMethod.MecanimHumanoid)
+                {
+	                var avatar = HumanoidSetup.AddAvatarToGameObject(gltfScene);
+	                if (avatar && avatar.isValid)
+						ctx.AddObjectToAsset("avatar", avatar);
+                }
 
                 var renderers = gltfScene.GetComponentsInChildren<Renderer>();
 
@@ -410,16 +480,6 @@ namespace UnityGLTF
             }
 
 #if UNITY_2017_3_OR_NEWER
-	        // We explicitly turn the new identifier on for new imports, that is, when no meta file existed before this import.
-	        if (!_useSceneNameIdentifier)
-	        {
-		        var importer = GetAtPath(ctx.assetPath);
-		        if (importer.importSettingsMissing)
-		        {
-			        _useSceneNameIdentifier = true;
-		        }
-	        }
-
 	        if (!_useSceneNameIdentifier)
 	        {
 		        // Set main asset
@@ -474,7 +534,7 @@ namespace UnityGLTF
         }
 #endif
 
-		private GameObject CreateGLTFScene(string projectFilePath)
+		private void CreateGLTFScene(string projectFilePath, out GameObject scene, out AnimationClip[] animationClips)
         {
 			var importOptions = new ImportOptions
 			{
@@ -516,7 +576,8 @@ namespace UnityGLTF
 					.Select(x => new TextureInfo() { texture = x.Texture, shouldBeLinear = x.IsLinear })
 					.ToList();
 
-				return loader.LastLoadedScene;
+				scene = loader.LastLoadedScene;
+				animationClips = loader.CreatedAnimationClips;
 			}
         }
 
