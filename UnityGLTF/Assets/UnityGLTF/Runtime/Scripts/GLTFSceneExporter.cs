@@ -250,8 +250,15 @@ namespace UnityGLTF
 
 		private struct FileInfo
 		{
-			public string path;
+			public Stream stream;
 			public string uniqueFileName;
+		}
+
+		public struct ExportFileResult
+		{
+			public string uri;
+			public string mimeType;
+			public BufferViewId bufferView;
 		}
 
 		public IReadOnlyList<Transform> RootTransforms => _rootTransforms;
@@ -268,7 +275,7 @@ namespace UnityGLTF
 #if ANIMATION_SUPPORTED
 		private List<(Transform tr, AnimationClip clip)> _animationClips;
 #endif
-		public bool shouldUseInternalBuffer;
+		private bool shouldUseInternalBuffer;
 		private Dictionary<int, int> _exportedTransforms;
 		private List<Transform> _animatedNodes;
 
@@ -1060,20 +1067,32 @@ namespace UnityGLTF
 		// 		&& ContainsValidRenderer(gameObject);
 		// }
 
-		public string ExportFile(string path) {
-			var fileName = Path.GetFileName(path);
-			var uniqueFileName = GetUniqueName(_fileNames, fileName);
+		public ExportFileResult ExportFile(string fileName, string mimeType, Stream stream) {
+			if (shouldUseInternalBuffer) {
+				byte[] data = new byte[stream.Length];
+				stream.Read(data, 0, (int)stream.Length);
+				stream.Close();
 
-			_fileNames.Add(uniqueFileName);
+				return new ExportFileResult {
+					bufferView = this.ExportBufferView(data),
+					mimeType = mimeType,
+				};
+			} else {
+				var uniqueFileName = GetUniqueName(_fileNames, fileName);
 
-			_fileInfos.Add(
-				new FileInfo {
-					path = path,
-					uniqueFileName = uniqueFileName,
-				}
-			);
+				_fileNames.Add(uniqueFileName);
 
-			return uniqueFileName;
+				_fileInfos.Add(
+					new FileInfo {
+						stream = stream,
+						uniqueFileName = uniqueFileName,
+					}
+				);
+
+				return new ExportFileResult {
+					uri = uniqueFileName,
+				};
+			}
 		}
 
 		private void ExportFiles(string outputPath)
@@ -1088,10 +1107,10 @@ namespace UnityGLTF
 				if (!Directory.Exists(dir) && dir != null)
 					Directory.CreateDirectory(dir);
 
-				var data = File.ReadAllBytes(fileInfo.path);
-
-				File.WriteAllBytes(fileOutputPath, data);
-
+				var outputStream = File.Create(fileOutputPath);
+				fileInfo.stream.Seek(0, SeekOrigin.Begin);
+				fileInfo.stream.CopyTo(outputStream);
+				outputStream.Close();
 			}
 		}
 
