@@ -248,6 +248,19 @@ namespace UnityGLTF
 			public bool canBeExportedFromDisk;
 		}
 
+		private struct FileInfo
+		{
+			public Stream stream;
+			public string uniqueFileName;
+		}
+
+		public struct ExportFileResult
+		{
+			public string uri;
+			public string mimeType;
+			public BufferViewId bufferView;
+		}
+
 		public IReadOnlyList<Transform> RootTransforms => _rootTransforms;
 
 		private Transform[] _rootTransforms;
@@ -255,12 +268,14 @@ namespace UnityGLTF
 		private BufferId _bufferId;
 		private GLTFBuffer _buffer;
 		private List<ImageInfo> _imageInfos;
+		private List<FileInfo> _fileInfos;
+		private HashSet<string> _fileNames;
 		private List<UniqueTexture> _textures;
 		private Dictionary<int, int> _exportedMaterials;
 #if ANIMATION_SUPPORTED
 		private List<(Transform tr, AnimationClip clip)> _animationClips;
 #endif
-		private bool _shouldUseInternalBufferForImages;
+		private bool shouldUseInternalBuffer;
 		private Dictionary<int, int> _exportedTransforms;
 		private List<Transform> _animatedNodes;
 
@@ -511,6 +526,8 @@ namespace UnityGLTF
 			};
 
 			_imageInfos = new List<ImageInfo>();
+			_fileInfos = new List<FileInfo>();
+			_fileNames = new HashSet<string>();
 			_exportedMaterials = new Dictionary<int, int>();
 			_textures = new List<UniqueTexture>();
 #if ANIMATION_SUPPORTED
@@ -546,16 +563,17 @@ namespace UnityGLTF
 			var dirName = Path.GetDirectoryName(fullPath);
 			if (dirName != null && !Directory.Exists(dirName))
 				Directory.CreateDirectory(dirName);
-			_shouldUseInternalBufferForImages = true;
+			shouldUseInternalBuffer = true;
 
 			using (FileStream glbFile = new FileStream(fullPath, FileMode.Create))
 			{
 				SaveGLBToStream(glbFile, fileName);
 			}
 
-			if (!_shouldUseInternalBufferForImages)
+			if (!shouldUseInternalBuffer)
 			{
 				ExportImages(path);
+				ExportFiles(path);
 			}
 		}
 
@@ -566,7 +584,7 @@ namespace UnityGLTF
 		/// <returns></returns>
 		public byte[] SaveGLBToByteArray(string sceneName)
 		{
-			_shouldUseInternalBufferForImages = true;
+			shouldUseInternalBuffer = true;
 			using (var stream = new MemoryStream())
 			{
 				SaveGLBToStream(stream, sceneName);
@@ -586,7 +604,7 @@ namespace UnityGLTF
 			exportGltfInitMarker.Begin();
 			Stream binStream = new MemoryStream();
 			Stream jsonStream = new MemoryStream();
-			_shouldUseInternalBufferForImages = true;
+			shouldUseInternalBuffer = true;
 
 			_bufferWriter = new BinaryWriterWithLessAllocations(binStream);
 
@@ -679,7 +697,7 @@ namespace UnityGLTF
 			exportGltfMarker.Begin();
 
 			exportGltfInitMarker.Begin();
-			_shouldUseInternalBufferForImages = false;
+			shouldUseInternalBuffer = false;
 			var toLower = fileName.ToLowerInvariant();
 			if (toLower.EndsWith(".gltf"))
 				fileName = fileName.Substring(0, fileName.Length - 5);
@@ -746,6 +764,7 @@ namespace UnityGLTF
 			binFile.Close();
 #endif
 			ExportImages(path);
+			ExportFiles(path);
 			gltfWriteOutMarker.End();
 
 			exportGltfMarker.End();
@@ -1050,6 +1069,53 @@ namespace UnityGLTF
 		// 		&& gameObject.transform.localScale == Vector3.one
 		// 		&& ContainsValidRenderer(gameObject);
 		// }
+
+		public ExportFileResult ExportFile(string fileName, string mimeType, Stream stream) {
+			if (shouldUseInternalBuffer) {
+				byte[] data = new byte[stream.Length];
+				stream.Read(data, 0, (int)stream.Length);
+				stream.Close();
+
+				return new ExportFileResult {
+					bufferView = this.ExportBufferView(data),
+					mimeType = mimeType,
+				};
+			} else {
+				var uniqueFileName = GetUniqueName(_fileNames, fileName);
+
+				_fileNames.Add(uniqueFileName);
+
+				_fileInfos.Add(
+					new FileInfo {
+						stream = stream,
+						uniqueFileName = uniqueFileName,
+					}
+				);
+
+				return new ExportFileResult {
+					uri = uniqueFileName,
+				};
+			}
+		}
+
+		private void ExportFiles(string outputPath)
+		{
+			for (int i = 0; i < _fileInfos.Count; ++i)
+			{
+				var fileInfo = _fileInfos[i];
+
+				var fileOutputPath = Path.Combine(outputPath, fileInfo.uniqueFileName);
+
+				var dir = Path.GetDirectoryName(fileOutputPath);
+				if (!Directory.Exists(dir) && dir != null)
+					Directory.CreateDirectory(dir);
+
+				var outputStream = File.Create(fileOutputPath);
+				fileInfo.stream.Seek(0, SeekOrigin.Begin);
+				fileInfo.stream.CopyTo(outputStream);
+				outputStream.Close();
+			}
+		}
 
 		private void ExportAnimation()
 		{

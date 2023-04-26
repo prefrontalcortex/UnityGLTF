@@ -173,7 +173,7 @@ namespace UnityGLTF
 				texture.Name = textureObj.name;
 			}
 
-			if (_shouldUseInternalBufferForImages)
+			if (shouldUseInternalBuffer)
 		    {
 				texture.Source = ExportImageInternalBuffer(uniqueTexture, textureSlot);
 		    }
