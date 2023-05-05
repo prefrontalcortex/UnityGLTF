@@ -565,6 +565,7 @@ namespace UnityGLTF
 			var pbr = new PbrMetallicRoughness() { MetallicFactor = 0, RoughnessFactor = 1.0f };
 			var isGltfPbrMetallicRoughnessShader = material.shader.name.Equals("GLTF/PbrMetallicRoughness", StringComparison.Ordinal);
 			var isGlTFastShader = material.shader.name.Equals("glTF/PbrMetallicRoughness", StringComparison.Ordinal);
+			isGlTFastShader |= material.shader.name.StartsWith("Shader Graphs/glTF-pbrMetallicRoughness");
 
 			if (material.HasProperty("baseColorFactor"))
 			{
@@ -581,6 +582,14 @@ namespace UnityGLTF
 			else if (material.HasProperty("_Color"))
 			{
 				pbr.BaseColorFactor = material.GetColor("_Color").ToNumericsColorLinear();
+			}
+
+			// This needs more investigation - looks like we need to convert linear/sRGB again for glTFast shaders?!
+			if (material.shader.name.StartsWith("Shader Graphs/glTF-pbrMetallicRoughness"))
+			{
+				pbr.BaseColorFactor.R = Mathf.Pow(pbr.BaseColorFactor.R, 1 / 2.2f);
+				pbr.BaseColorFactor.G = Mathf.Pow(pbr.BaseColorFactor.G, 1 / 2.2f);
+				pbr.BaseColorFactor.B = Mathf.Pow(pbr.BaseColorFactor.B, 1 / 2.2f);
 			}
 
             if (material.HasProperty("_TintColor")) //particles use _TintColor instead of _Color
