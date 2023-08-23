@@ -132,6 +132,93 @@ namespace UnityGLTF
 			}
 		}
 
+		internal async Task<(string, byte[])> GetImageFileExtensionAndData(GLTFImage image)
+		{
+			(string, byte[]) result = new ("", new byte[0]);
+
+			switch (image.MimeType)
+			{
+				case "image/png":
+					result.Item1 = ".png";
+					break;
+				case "image/jpeg":
+					result.Item1 = ".jpg";
+					break;
+				case "image/exr":
+					result.Item1 = ".exr";
+					break;
+				case "image/ktx2":
+					result.Item1 = ".ktx2";
+					break;
+			}
+
+			int bufferIndex = image.BufferView.Value.Buffer.Id;
+			await ConstructBuffer(_gltfRoot.Buffers[bufferIndex], bufferIndex);
+
+			Stream stream = null;
+			if (image.Uri == null)
+			{
+				var bufferView = image.BufferView.Value;
+				var data = new byte[bufferView.ByteLength];
+
+				BufferCacheData bufferContents = _assetCache.BufferCache[bufferView.Buffer.Id];
+				bufferContents.Stream.Position = bufferView.ByteOffset + bufferContents.ChunkOffset;
+				stream = new SubStream(bufferContents.Stream, 0, data.Length);
+			}
+			else
+			{
+				string uri = image.Uri;
+
+				byte[] bufferData;
+				URIHelper.TryParseBase64(uri, out bufferData);
+				if (bufferData != null)
+				{
+					stream = new MemoryStream(bufferData, 0, bufferData.Length, false, true);
+				}
+				else
+				{
+					result.Item2 = bufferData;
+					return result;
+				}
+			}
+
+#if UNITY_EDITOR
+			if (stream is AssetDatabaseStream)
+			{
+				// Is Asset File, abort here
+				return result;
+			}
+#endif
+			if (stream is FileLoader.InvalidStream invalidStream)
+			{
+				// Abort here
+				return result;
+			}
+
+			if (stream is MemoryStream)
+			{
+				using (MemoryStream memoryStream = stream as MemoryStream)
+				{
+					result.Item2 = memoryStream.ToArray();
+				}
+			}
+			else
+			{
+				byte[] buffer = new byte[stream.Length];
+
+				// todo: potential optimization is to split stream read into multiple frames (or put it on a thread?)
+				if (stream.Length > int.MaxValue)
+				{
+					throw new Exception("Stream is larger than can be copied into byte array");
+				}
+				stream.Read(buffer, 0, (int)stream.Length);
+				result.Item2 = buffer;
+			}
+
+			return result;
+		}
+
+
 		// With using KTX, we need to return a new Texture2D instance at the moment. Unity KTX package does not support loading into existing one
 		async Task<Texture2D> CheckMimeTypeAndLoadImage(GLTFImage image, Texture2D texture, byte[] data, bool markGpuOnly)
 		{
@@ -207,12 +294,15 @@ namespace UnityGLTF
 			var newTextureObject = texture;
 
 #if UNITY_EDITOR
+
+			var sourceIdentifier = new AssetImporter.SourceAssetIdentifier(texture);
 			var haveRemappedTexture = false;
+			_assetCache.ImageSourceAssetId[imageCacheIndex] = sourceIdentifier;
+
 			if (Context.SourceImporter != null)
 			{
 				// check for remapping, we don't even need to attempt loading the texture in that case.
 				var externalObjects = Context.SourceImporter.GetExternalObjectMap();
-				var sourceIdentifier = new AssetImporter.SourceAssetIdentifier(texture);
 				externalObjects.TryGetValue(sourceIdentifier, out var o);
 				if (o is Texture2D remappedTexture)
 				{
@@ -281,14 +371,19 @@ namespace UnityGLTF
 			_assetCache.ImageCache[imageCacheIndex] = texture;
 		}
 
-
-		protected virtual int GetTextureSourceId(GLTFTexture texture)
+		internal static ImageId GetTextureSource(GLTFTexture texture)
 		{
 			if (texture.Extensions != null && texture.Extensions.ContainsKey(KHR_texture_basisu.EXTENSION_NAME))
 			{
-				return ((KHR_texture_basisu)texture.Extensions[KHR_texture_basisu.EXTENSION_NAME]).source.Id;
+				return (texture.Extensions[KHR_texture_basisu.EXTENSION_NAME] as KHR_texture_basisu).source;
 			}
-			return texture.Source?.Id ?? 0;
+			return texture.Source;
+		}
+
+		internal static int GetTextureSourceId(GLTFTexture texture)
+		{
+			var source = GetTextureSource(texture);
+			return source?.Id ?? 0;
 		}
 
 		protected virtual bool IsTextureFlipped(GLTFTexture texture)
@@ -336,7 +431,6 @@ namespace UnityGLTF
 				{
 					_assetCache = new AssetCache(_gltfRoot);
 				}
-
 				await ConstructImageBuffer(texture, textureIndex);
 				await ConstructTexture(texture, textureIndex, markGpuOnly, isLinear);
 			}
@@ -487,6 +581,8 @@ namespace UnityGLTF
 						Debug.Log(LogType.Warning, ($"Sampler state doesn't match but source texture is non-readable. Results might not be correct if textures are used multiple times with different sampler states. {source.filterMode} == {desiredFilterMode} && {source.wrapModeU} == {desiredWrapModeS} && {source.wrapModeV} == {desiredWrapModeT}"));
 					_assetCache.TextureCache[textureIndex].Texture = source;
 				}
+
+				_assetCache.TextureAssetId[textureIndex] = _assetCache.ImageSourceAssetId[sourceId];
 #endif
 			}
 

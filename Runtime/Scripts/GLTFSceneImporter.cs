@@ -5,7 +5,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,6 +21,9 @@ using Vector4 = UnityEngine.Vector4;
 using ThreadPriority = System.Threading.ThreadPriority;
 #endif
 using WrapMode = UnityEngine.WrapMode;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace UnityGLTF
 {
@@ -214,6 +216,9 @@ namespace UnityGLTF
 			get { return _lastLoadedScene; }
 		}
 
+#if UNITY_EDITOR
+		internal AssetImporter.SourceAssetIdentifier[] TextureSourceAssetId => _assetCache.TextureAssetId;
+#endif
 		public TextureCacheData[] TextureCache => _assetCache.TextureCache;
 		public Texture2D[] InvalidImageCache => _assetCache.InvalidImageCache;
 		public MaterialCacheData[] MaterialCache => _assetCache.MaterialCache;
@@ -1114,7 +1119,7 @@ namespace UnityGLTF
 			}
 		}
 
-		private async Task SetupLoad(Func<Task> callback)
+		internal async Task SetupLoad(Func<Task> callback)
 		{
 			try
 			{
