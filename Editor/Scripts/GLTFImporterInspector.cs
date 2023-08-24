@@ -312,8 +312,8 @@ namespace UnityGLTF
 						if (!mat) continue;
 
 						AssetImporter.SourceAssetIdentifier id;
-						if (mat is Texture2D && i < t.m_TexturesIds.Length)
-							id = t.m_TexturesIds[i];
+						if (mat is Texture2D && i < t.m_OrgTexturesNames.Length)
+							id = new AssetImporter.SourceAssetIdentifier(typeof(Texture2D), t.m_OrgTexturesNames[i]);
 						else
 							id = new AssetImporter.SourceAssetIdentifier(mat);
 

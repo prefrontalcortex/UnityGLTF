@@ -111,7 +111,7 @@ namespace UnityGLTF
         // asset remapping
         [SerializeField] internal Material[] m_Materials = new Material[0];
         [SerializeField] internal Texture[] m_Textures = new Texture[0];
-        [SerializeField] internal SourceAssetIdentifier[] m_TexturesIds = new SourceAssetIdentifier[0];
+        [SerializeField] internal string[] m_OrgTexturesNames = new string[0];
         [SerializeField] internal bool m_HasSceneData = true;
         [SerializeField] internal bool m_HasAnimationData = true;
         [SerializeField] internal bool m_HasMaterialData = true;
@@ -627,7 +627,7 @@ namespace UnityGLTF
 		                .Where(x => x)
 		                .Union(invalidTextures).Distinct().ToList();
 
-	                m_TexturesIds = new SourceAssetIdentifier[textures.Count];
+	                m_OrgTexturesNames = new string[textures.Count];
 
 	                for (int i = 0; i < textures.Count; i++)
 	                {
@@ -635,7 +635,7 @@ namespace UnityGLTF
 		                {
 			                if (textures[i] == importer.TextureCache[j].Texture)
 			                {
-				                m_TexturesIds[i] = importer.TextureSourceAssetId[j];
+				                m_OrgTexturesNames[i] = importer.TextureSourceAssetId[j].name;
 				                break;
 			                }
 		                }
