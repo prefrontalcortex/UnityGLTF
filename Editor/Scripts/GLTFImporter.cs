@@ -631,13 +631,20 @@ namespace UnityGLTF
 
 	                for (int i = 0; i < textures.Count; i++)
 	                {
+		                bool found = false;
 		                for (int j = 0; j < importer.TextureCache.Length; j++)
 		                {
 			                if (textures[i] == importer.TextureCache[j].Texture)
 			                {
+				                found = true;
 				                m_OrgTexturesNames[i] = importer.TextureSourceAssetId[j].name;
 				                break;
 			                }
+		                }
+
+		                if (!found)
+		                {
+			                m_OrgTexturesNames[i] = textures[i].name;
 		                }
 	                }
 	                // if we're not importing materials or textures, we can clear the lists
