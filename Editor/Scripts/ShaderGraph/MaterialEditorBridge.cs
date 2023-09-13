@@ -39,8 +39,6 @@ namespace UnityGLTF
 			var path = Path.GetDirectoryName(assetPath);
 			var name = Path.GetFileName(assetPath);
 
-
-
 			// var allObjects = AssetDatabase.LoadAllAssetsAtPath(assetPath);
 			foreach (var obj in importer.m_Materials)
 			{

@@ -225,8 +225,6 @@ namespace UnityGLTF
 					var destinationPath = dirName + "/" + filename + fileExtension;
 					var assetPath = AssetDatabase.GetAssetPath(subAsset);
 
-
-
 					if (subAsset is Texture)
 					{
 						var newFile = t.ExtractTexture(t.Textures[index], dirName);
@@ -248,7 +246,6 @@ namespace UnityGLTF
 						var assetImporter = AssetImporter.GetAtPath(assetPath);
 						assetImporter.AddRemap(new AssetImporter.SourceAssetIdentifier(subAsset), clone);
 					}
-
 
 					if (importImmediately)
 					{
@@ -347,7 +344,7 @@ namespace UnityGLTF
 								{
 									t.RemoveRemap(id);
 #if UNITY_2022_2_OR_NEWER
-								SaveChanges();
+									SaveChanges();
 #else
 									ApplyAndImport();
 #endif

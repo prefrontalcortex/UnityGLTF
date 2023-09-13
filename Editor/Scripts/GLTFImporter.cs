@@ -30,7 +30,6 @@ using UnityGLTF.Plugins;
 #if UNITY_2020_2_OR_NEWER
 using UnityEditor.AssetImporters;
 using UnityGLTF.Cache;
-
 #else
 using UnityEditor.Experimental.AssetImporters;
 #endif
@@ -634,7 +633,7 @@ namespace UnityGLTF
 		                bool found = false;
 		                for (int j = 0; j < importer.TextureCache.Length; j++)
 		                {
-			                if (textures[i] == importer.TextureCache[j].Texture)
+							if (textures[i] == importer.TextureCache[j].Texture)
 			                {
 				                found = true;
 				                m_OrgTexturesNames[i] = importer.TextureSourceAssetId[j].name;
