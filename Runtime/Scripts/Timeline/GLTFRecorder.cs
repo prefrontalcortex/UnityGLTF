@@ -266,22 +266,6 @@ namespace UnityGLTF.Timeline
 			}
 		}
 
-		public void CutRecording(double start, double end)
-		{
-			if (start == 0d && end >= lastRecordedTime)
-				return;
-			
-			foreach (var d in data)
-			{
-				foreach (var track in d.Value.tracks)
-				{
-					track.CutTrack(start, end);
-				}
-			}
-			
-			lastRecordedTime-=start-(lastRecordedTime-end);
-		}
-
 		public void StartRecording(double time)
 		{
 			startTime = time;
