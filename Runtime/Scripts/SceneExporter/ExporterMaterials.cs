@@ -586,7 +586,8 @@ namespace UnityGLTF
 		{
 			var info = new OcclusionTextureInfo();
 
-			info.Index = ExportTexture(texture, textureSlot);
+			var conversion = GetExportSettingsForSlot(TextureMapType.Occlusion);
+			info.Index = ExportTexture(texture, textureSlot, conversion);
 
 			if (material.HasProperty("occlusionStrength"))
 			{

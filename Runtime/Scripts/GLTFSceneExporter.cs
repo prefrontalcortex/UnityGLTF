@@ -200,6 +200,7 @@ namespace UnityGLTF
 				case TextureMapType.Occlusion: // Occlusion = Linear;
 					exportSettings.linear = true;
 					exportSettings.alphaMode = TextureExportSettings.AlphaMode.Never;
+					exportSettings.conversion = TextureExportSettings.Conversion.MetalGlossChannelSwap;
 					return exportSettings;
 
 				// custom slot types that allow us to export more arbitrary textures

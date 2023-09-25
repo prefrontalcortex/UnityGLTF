@@ -78,7 +78,7 @@ namespace UnityGLTF
 		/// <summary>
 		/// This converts Unity's metallic-gloss texture representation into GLTF's metallic-roughness specifications.
 		/// Unity's metallic-gloss A channel (glossiness) is inverted and goes into GLTF's metallic-roughness G channel (roughness).
-		/// Unity's metallic-gloss R channel (metallic) goes into GLTF's metallic-roughess B channel.
+		/// Unity's metallic-gloss R channel (metallic) goes into GLTF's metallic-roughness B channel.
 		/// </summary>
 		/// <param name="texture">Unity's metallic-gloss texture to be exported</param>
 		/// <param name="outputPath">The location to export the texture</param>

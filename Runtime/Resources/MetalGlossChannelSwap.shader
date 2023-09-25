@@ -52,10 +52,12 @@
 				// Unity, by default, puts metallic in R channel and glossiness in A channel.
 				// Unity uses a metallic-gloss texture so we need to invert the value in the g channel.
 				//
-				// Conversion Summary
+				// Conversion Summary - source is MAOS, result is ORM
 				// Unity R channel goes into B channel
 				// Unity A channel goes into G channel, then inverted
-				float4 result = float4(0, 1 - (col.a * _SmoothnessMultiplier), col.r, 1);
+				// Unity G channel goes into R channel (at least for URP - https://docs.unity3d.com/Packages/com.unity.render-pipelines.universal@7.1/manual/lit-shader.html#advanced)
+				float4 result = float4(col.g, 1 - (col.a * _SmoothnessMultiplier), col.r, 1);
+				result = float4(1,1,1,1);
 				#ifdef UNITY_COLORSPACE_GAMMA
 				#else
 				// hack for linear color space, need to figure out
