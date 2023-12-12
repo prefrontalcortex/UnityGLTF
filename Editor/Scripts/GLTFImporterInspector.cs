@@ -222,7 +222,7 @@ namespace UnityGLTF
 				// TODO this also counts old remaps that are not used anymore
 				var remapCount = externalObjectMap.Values.Count(x => x is T);
 
-				void ExtractAsset(T subAsset, bool importImmediately)
+				void ExtractAsset(T subAsset, bool importImmediately, int index = -1)
 				{
 					if (!subAsset) return;
 					var filename = SanitizePath(subAsset.name);
@@ -232,11 +232,27 @@ namespace UnityGLTF
 					var destinationPath = dirName + "/" + filename + fileExtension;
 					var assetPath = AssetDatabase.GetAssetPath(subAsset);
 
-					var clone = Instantiate(subAsset);
-					AssetDatabase.CreateAsset(clone, destinationPath);
+					if (subAsset is Texture)
+					{
+						var newFile = t.ExtractTexture(t.Textures[index], dirName);
 
-					var assetImporter = AssetImporter.GetAtPath(assetPath);
-					assetImporter.AddRemap(new AssetImporter.SourceAssetIdentifier(subAsset), clone);
+						if (string.IsNullOrEmpty(newFile))
+							return;
+
+						AssetDatabase.ImportAsset(newFile, ImportAssetOptions.ForceUpdate);
+						var newImage = AssetDatabase.LoadAssetAtPath<Texture2D>(newFile);
+						//newImage.name = Path.GetFileNameWithoutExtension(newFile);
+						var assetImporter = AssetImporter.GetAtPath(assetPath);
+						AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
+						assetImporter.AddRemap(new AssetImporter.SourceAssetIdentifier(subAsset), newImage);
+					}
+					else
+					{
+						var clone = Instantiate(subAsset);
+						AssetDatabase.CreateAsset(clone, destinationPath);
+						var assetImporter = AssetImporter.GetAtPath(assetPath);
+						assetImporter.AddRemap(new AssetImporter.SourceAssetIdentifier(subAsset), clone);
+					}
 
 					if (importImmediately)
 					{
@@ -250,53 +266,61 @@ namespace UnityGLTF
 				SessionState.SetBool(remapFoldoutKey, remapFoldout);
 				if (remapFoldout)
 				{
-					if (remapCount > 0)
+					EditorGUILayout.BeginHorizontal();
+
+					if (remapCount > 0 && GUILayout.Button("Restore all " + subDirectoryName))
 					{
-						EditorGUILayout.BeginHorizontal();
-
-						if (GUILayout.Button("Restore all " + subDirectoryName))
+						for (var i = 0; i < importedData.arraySize; i++)
 						{
-							for (var i = 0; i < importedData.arraySize; i++)
-							{
-								var mat = importedData.GetArrayElementAtIndex(i).objectReferenceValue as T;
-								if (!mat) continue;
-								t.RemoveRemap(new AssetImporter.SourceAssetIdentifier(mat));
-							}
-
-							// also remove all old remaps
-							var oldRemaps = externalObjectMap.Where(x => x.Value is T).ToList();
-							foreach (var oldRemap in oldRemaps)
-							{
-								t.RemoveRemap(oldRemap.Key);
-							}
+							var mat = importedData.GetArrayElementAtIndex(i).objectReferenceValue as T;
+							if (!mat) continue;
+							t.RemoveRemap(new AssetImporter.SourceAssetIdentifier(mat));
 						}
 
-						if (typeof(T) == typeof(Material) && GUILayout.Button("Extract all " + subDirectoryName))
+						// also remove all old remaps
+						var oldRemaps = externalObjectMap.Where(x => x.Value is T).ToList();
+						foreach (var oldRemap in oldRemaps)
 						{
-							var materials = new T[importedData.arraySize];
-							for (var i = 0; i < importedData.arraySize; i++)
-								materials[i] = importedData.GetArrayElementAtIndex(i).objectReferenceValue as T;
-
-							for (var i = 0; i < materials.Length; i++)
-							{
-								if (!materials[i]) continue;
-								AssetDatabase.StartAssetEditing();
-								ExtractAsset(materials[i], false);
-								AssetDatabase.StopAssetEditing();
-								var assetPath = AssetDatabase.GetAssetPath(target);
-								AssetDatabase.WriteImportSettingsIfDirty(assetPath);
-								AssetDatabase.Refresh();
-							}
+							t.RemoveRemap(oldRemap.Key);
 						}
-
-						EditorGUILayout.EndHorizontal();
 					}
+
+					if (typeof(T) == typeof(Material) && GUILayout.Button("Extract all " + subDirectoryName))
+					{
+						var materials = new T[importedData.arraySize];
+						for (var i = 0; i < importedData.arraySize; i++)
+							materials[i] = importedData.GetArrayElementAtIndex(i).objectReferenceValue as T;
+
+						for (var i = 0; i < materials.Length; i++)
+						{
+							if (!materials[i]) continue;
+
+							bool canExtracted = materials[i] is Material || (materials[i] is Texture && t.Textures[i].isExtractable);
+							if (!canExtracted) continue;
+
+							AssetDatabase.StartAssetEditing();
+							ExtractAsset(materials[i], false);
+							AssetDatabase.StopAssetEditing();
+							var assetPath = AssetDatabase.GetAssetPath(target);
+							AssetDatabase.WriteImportSettingsIfDirty(assetPath);
+							AssetDatabase.Refresh();
+						}
+					}
+
+					EditorGUILayout.EndHorizontal();
+
 
 					for (var i = 0; i < importedData.arraySize; i++)
 					{
 						var mat = importedData.GetArrayElementAtIndex(i).objectReferenceValue as T;
 						if (!mat) continue;
-						var id = new AssetImporter.SourceAssetIdentifier(mat);
+
+						AssetImporter.SourceAssetIdentifier id;
+						if (mat is Texture2D && i < t.m_OrgTexturesNames.Length)
+							id = new AssetImporter.SourceAssetIdentifier(typeof(Texture2D), t.m_OrgTexturesNames[i]);
+						else
+							id = new AssetImporter.SourceAssetIdentifier(mat);
+
 						externalObjectMap.TryGetValue(id, out var remap);
 						EditorGUILayout.BeginHorizontal();
 						// EditorGUILayout.ObjectField(/*mat.name,*/ mat, typeof(Material), false);
@@ -310,25 +334,29 @@ namespace UnityGLTF
 								t.RemoveRemap(id);
 						}
 
-						if (!remap)
+						bool canExtracted = mat is Material || (mat is Texture && t.Textures[i].isExtractable);
+						if (canExtracted)
 						{
-							if (GUILayout.Button("Extract", GUILayout.Width(60)))
+							if (!remap)
 							{
-								ExtractAsset(mat, true);
-								GUIUtility.ExitGUI();
+								if (GUILayout.Button("Extract", GUILayout.Width(60)))
+								{
+									ExtractAsset(mat, true, i);
+									GUIUtility.ExitGUI();
+								}
 							}
-						}
-						else
-						{
-							if (GUILayout.Button("Restore", GUILayout.Width(60)))
+							else
 							{
-								t.RemoveRemap(id);
+								if (GUILayout.Button("Restore", GUILayout.Width(60)))
+								{
+									t.RemoveRemap(id);
 #if UNITY_2022_2_OR_NEWER
-								SaveChanges();
+									SaveChanges();
 #else
-								ApplyAndImport();
+									ApplyAndImport();
 #endif
-								GUIUtility.ExitGUI();
+									GUIUtility.ExitGUI();
+								}
 							}
 						}
 

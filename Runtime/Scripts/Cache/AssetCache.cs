@@ -2,6 +2,7 @@
 using UnityEngine;
 using System.IO;
 using GLTF.Schema;
+using UnityEditor;
 
 namespace UnityGLTF.Cache
 {
@@ -19,6 +20,14 @@ namespace UnityGLTF.Cache
 		/// Loaded raw texture data
 		/// </summary>
 		public Texture2D[] ImageCache { get; private set; }
+
+#if UNITY_EDITOR
+		/// <summary>
+		/// Loaded texture asset ids
+		/// </summary>
+		public AssetImporter.SourceAssetIdentifier[] ImageSourceAssetId { get; private set; }
+		public AssetImporter.SourceAssetIdentifier[] TextureAssetId { get; private set; }
+#endif
 
 		/// <summary>
 		/// Invalid/missing textures. These are cached since we can still remap them after import, but don't
@@ -65,6 +74,11 @@ namespace UnityGLTF.Cache
 		public AssetCache(GLTFRoot root)
 		{
 			ImageCache = new Texture2D[root.Images?.Count ?? 0];
+#if UNITY_EDITOR
+			ImageSourceAssetId = new AssetImporter.SourceAssetIdentifier[root.Images?.Count ?? 0];
+			TextureAssetId = new AssetImporter.SourceAssetIdentifier[root.Textures?.Count ?? 0];
+#endif
+
 			InvalidImageCache = new Texture2D[ImageCache.Length];
 			ImageStreamCache = new Stream[ImageCache.Length];
 			TextureCache = new TextureCacheData[root.Textures?.Count ?? 0];

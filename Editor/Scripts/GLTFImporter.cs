@@ -21,6 +21,7 @@ using UnityEngine;
 using System.Collections.Generic;
 using System.Linq;
 using System;
+using System.Text.RegularExpressions;
 using Object = UnityEngine.Object;
 using UnityGLTF.Loader;
 using GLTF.Schema;
@@ -28,7 +29,7 @@ using GLTF;
 using UnityGLTF.Plugins;
 #if UNITY_2020_2_OR_NEWER
 using UnityEditor.AssetImporters;
-using UnityEngine.Rendering;
+using UnityGLTF.Cache;
 #else
 using UnityEditor.Experimental.AssetImporters;
 #endif
@@ -48,7 +49,7 @@ namespace UnityGLTF
 #endif
     public class GLTFImporter : ScriptedImporter, IGLTFImportRemap
     {
-	    private const int ImporterVersion = 9;
+	    private const int ImporterVersion = 11;
 
 	    private static void EnsureShadersAreLoaded()
 	    {
@@ -88,6 +89,7 @@ namespace UnityGLTF
         [SerializeField] internal bool _readWriteEnabled = true;
         [SerializeField] internal bool _generateColliders = false;
         [SerializeField] internal bool _swapUvs = false;
+
         [SerializeField] internal bool _generateLightmapUVs = false;
 	    [Tooltip("When false, the index of the BlendShape is used as name.")]
         [SerializeField] internal bool _importBlendShapeNames = true;
@@ -110,6 +112,7 @@ namespace UnityGLTF
         // asset remapping
         [SerializeField] internal Material[] m_Materials = new Material[0];
         [SerializeField] internal Texture[] m_Textures = new Texture[0];
+        [SerializeField] internal string[] m_OrgTexturesNames = new string[0];
         [SerializeField] internal bool m_HasSceneData = true;
         [SerializeField] internal bool m_HasAnimationData = true;
         [SerializeField] internal bool m_HasMaterialData = true;
@@ -145,8 +148,10 @@ namespace UnityGLTF
         [Serializable]
         public class TextureInfo
         {
+	        public int imageIndex;
 	        public Texture2D texture;
 	        public bool shouldBeLinear;
+	        public bool isExtractable;
         }
 
         [Serializable]
@@ -223,6 +228,65 @@ namespace UnityGLTF
 		        }
 	        }
 	        return dependencies.Distinct().ToArray();
+        }
+
+        internal static string ValidateFilename(string filename)
+        {
+	        return Regex.Replace(filename, "[^a-zA-Z0-9_]+", "_", RegexOptions.Compiled);
+        }
+
+        public string ExtractTexture(TextureInfo textureInfo, string toPath)
+        {
+	        var projectFilePath = assetPath;
+
+	        // TODO: replace with GltfImportContext
+	        var importOptions = new ImportOptions
+	        {
+		        DataLoader = new FileLoader(Path.GetDirectoryName(projectFilePath)),
+		        AnimationMethod = _importAnimations,
+		        AnimationLoopTime = _animationLoopTime,
+		        AnimationLoopPose = _animationLoopPose,
+		        //ImportContext = context,
+		        SwapUVs = _swapUvs,
+		        ImportNormals = _importNormals,
+		        ImportTangents = _importTangents
+	        };
+
+	        string resultPath = "";
+	        using (var stream = File.OpenRead(projectFilePath))
+	        {
+		        GLTFParser.ParseJson(stream, out var gltfRoot);
+		        stream.Position = 0; // Make sure the read position is changed back to the beginning of the file
+		        var loader = new GLTFSceneImporter(gltfRoot, stream, importOptions);
+		        loader.LoadUnreferencedImagesAndMaterials = true;
+		        loader.MaximumLod = _maximumLod;
+		        loader.IsMultithreaded = false;
+
+		        AsyncHelpers.RunSync( () =>
+			        loader.SetupLoad(async () =>
+			        {
+				        var imageIndex = textureInfo.imageIndex;
+				        if (imageIndex >= 0 && imageIndex < loader.Root.Images.Count)
+				        {
+					        var result = await loader.GetImageFileExtensionAndData(gltfRoot.Images[imageIndex]);
+					        var fileName = ValidateFilename(textureInfo.texture.name);
+					        var relativePath = Path.Combine(toPath, fileName + result.Item1);
+					        relativePath = relativePath.Replace('/', Path.DirectorySeparatorChar);
+					        relativePath = relativePath.Replace('\\', Path.DirectorySeparatorChar);
+
+					        var fullPath = Path.GetFullPath(relativePath);
+					        await File.WriteAllBytesAsync(fullPath, result.Item2);
+					        resultPath = relativePath;
+				        }
+				        else
+				        {
+					        Debug.LogError("Invalid image index " + imageIndex);
+				        }
+
+			        }));
+	        }
+
+	        return resultPath;
         }
 
         public override void OnImportAsset(AssetImportContext ctx)
@@ -564,6 +628,26 @@ namespace UnityGLTF
 		                .Where(x => x)
 		                .Union(invalidTextures).Distinct().ToList();
 
+	                m_OrgTexturesNames = new string[textures.Count];
+
+	                for (int i = 0; i < textures.Count; i++)
+	                {
+		                bool found = false;
+		                for (int j = 0; j < importer.TextureCache.Length; j++)
+		                {
+							if (textures[i] == importer.TextureCache[j].Texture)
+			                {
+				                found = true;
+				                m_OrgTexturesNames[i] = importer.TextureSourceAssetId[j].name;
+				                break;
+			                }
+		                }
+
+		                if (!found)
+		                {
+			                m_OrgTexturesNames[i] = textures[i].name;
+		                }
+	                }
 	                // if we're not importing materials or textures, we can clear the lists
 	                // so that no assets are actually created.
 	                if (!_importMaterials)
@@ -656,6 +740,7 @@ namespace UnityGLTF
 
                     m_Materials = materials.ToArray();
                     m_Textures = textures.ToArray();
+
                     m_HasSceneData = gltfScene;
                     m_HasMaterialData = importer.Root.Materials != null && importer.Root.Materials.Count > 0;
                     m_HasTextureData = importer.Root.Textures != null && importer.Root.Textures.Count > 0;
@@ -832,9 +917,35 @@ namespace UnityGLTF
 				    _extensions = new List<ExtensionInfo>();
 			    }
 
+			    bool isTextureExtractable(TextureCacheData tex)
+			    {
+				    var source = GLTFSceneImporter.GetTextureSource(tex.TextureDefinition);
+				    if (source == null)
+					    return false;
+
+				    if (source.Value == null)
+					    return false;
+
+				    var uri = source.Value.Uri;
+
+				    if (string.IsNullOrEmpty(uri))
+					    return true;
+
+				    if (URIHelper.IsBase64Uri(uri))
+					    return true;
+
+				    return false;
+			    }
+
 			    _textures = loader.TextureCache
 				    .Where(x => x != null)
-				    .Select(x => new TextureInfo() { texture = x.Texture, shouldBeLinear = x.IsLinear })
+				    .Select(x => new TextureInfo()
+				    {
+					    texture = x.Texture,
+					    shouldBeLinear = x.IsLinear,
+					    imageIndex = GLTFSceneImporter.GetTextureSourceId(x.TextureDefinition),
+					    isExtractable = isTextureExtractable(x)
+				    })
 				    .ToList();
 
 			    scene = loader.LastLoadedScene;
