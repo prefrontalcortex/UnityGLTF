@@ -223,7 +223,6 @@ namespace UnityGLTF
 			var jobHandlesList = new List<JobHandle>(root.BufferViews.Count);
 			var meshOptBufferViews = new Dictionary<int, NativeArray<byte>>();
 			var meshOptReturnValues = new NativeArray<int>( root.BufferViews.Count, Allocator.TempJob);
-			var meshOptInputBuffers = new List<NativeArray<byte>>();
 
 			foreach (var bView in root.BufferViews)
 			{
@@ -239,15 +238,13 @@ namespace UnityGLTF
 					BufferCacheData bufferContents = _assetCache.BufferCache[ meshOpt.bufferView.Buffer.Id];
 
 					GLTFHelpers.LoadBufferView(meshOpt.bufferView, bufferContents.ChunkOffset, bufferContents.bufferData, out NativeArray<byte> bufferViewData);
-					var origBufferView = new NativeArray<byte>(bufferViewData, Allocator.TempJob );
-					meshOptInputBuffers.Add(origBufferView);
 
 					var jobHandle = Meshoptimizer.Decode.DecodeGltfBuffer(
 						new NativeSlice<int>(meshOptReturnValues,bufferViewIndex,1),
 							arr,
 							meshOpt.count,
 							(int)meshOpt.bufferView.ByteStride,
-							origBufferView,
+							bufferViewData,
 							meshOpt.mode,
 							meshOpt.filter
 						);
@@ -277,21 +274,13 @@ namespace UnityGLTF
 			{
 				var bufferView = root.BufferViews[m.Key];
 				var bufferData = await GetBufferData(bufferView.Buffer);
-				bufferData.Stream.Seek(bufferView.ByteOffset, System.IO.SeekOrigin.Begin);
-				var bufferContent = m.Value.ToArray();
-				bufferData.Stream.Write(bufferContent, 0, bufferContent.Length);
+				NativeArray<byte>.Copy(m.Value, 0, bufferData.bufferData, (int)bufferView.ByteOffset, m.Value.Length);
 				m.Value.Dispose();
 			}
-
-			foreach (var m in meshOptInputBuffers)
-			{
-				m.Dispose();
-			}
-
+			
 			meshOptReturnValues.Dispose();
 		}
 #endif
-
 
 		protected void ApplyImportOptionsOnMesh(Mesh mesh)
 		{

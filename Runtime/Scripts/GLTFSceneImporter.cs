@@ -945,13 +945,10 @@ namespace UnityGLTF
 			if (buffer.Extensions != null && buffer.Extensions.ContainsKey(EXT_meshopt_compression_Factory.EXTENSION_NAME))
 			{
 				if (_assetCache.BufferCache[bufferIndex] != null) Debug.Log(LogType.Error, "_assetCache.BufferCache[bufferIndex] != null;");
-
-				var meshOptBufferMemoryStream = new MemoryStream((int)buffer.ByteLength);
-				meshOptBufferMemoryStream.SetLength((int)buffer.ByteLength);
-
+				
 				var bufferCacheDate = new BufferCacheData
 				{
-					Stream = meshOptBufferMemoryStream,
+					bufferData = new NativeArray<byte>((int)buffer.ByteLength, Allocator.Persistent),
 					ChunkOffset = 0
 				};
 
