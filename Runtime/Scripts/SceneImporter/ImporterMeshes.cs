@@ -238,7 +238,7 @@ namespace UnityGLTF
 
 					BufferCacheData bufferContents = _assetCache.BufferCache[ meshOpt.bufferView.Buffer.Id];
 
-					GLTFHelpers.LoadBufferView(meshOpt.bufferView, bufferContents.ChunkOffset, bufferContents.Stream, out byte[] bufferViewData);
+					GLTFHelpers.LoadBufferView(meshOpt.bufferView, bufferContents.ChunkOffset, bufferContents.bufferData, out NativeArray<byte> bufferViewData);
 					var origBufferView = new NativeArray<byte>(bufferViewData, Allocator.TempJob );
 					meshOptInputBuffers.Add(origBufferView);
 
