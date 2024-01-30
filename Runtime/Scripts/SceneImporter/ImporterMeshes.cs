@@ -788,7 +788,7 @@ namespace UnityGLTF
 			}
 			try
 			{
-				GLTFHelpers.BuildMeshAttributes(ref attributeAccessors, ref sparseAccessors);
+				await GLTFHelpers.BuildMeshAttributes(attributeAccessors, sparseAccessors);
 			}
 			catch (GLTFLoadException e)
 			{

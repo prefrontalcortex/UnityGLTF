@@ -3,6 +3,7 @@ using System.IO;
 using System.Text.RegularExpressions;
 using GLTF.Schema;
 using System.Linq;
+using System.Threading.Tasks;
 using Unity.Collections;
 using Unity.Mathematics;
 
@@ -255,144 +256,131 @@ namespace GLTF
 		/// Uses the accessor to parse the buffer into attributes needed to construct the mesh primitive
 		/// </summary>
 		/// <param name="attributes">A dictionary that contains a mapping of attribute name to data needed to parse</param>
-		public static void BuildMeshAttributes(ref Dictionary<string, AttributeAccessor> attributes, ref Dictionary<string, (AttributeAccessor sparseIndices, AttributeAccessor sparseValues)> sparseAccessors)
+		public static async Task BuildMeshAttributes(Dictionary<string, AttributeAccessor> attributes, Dictionary<string, (AttributeAccessor sparseIndices, AttributeAccessor sparseValues)> sparseAccessors)
 		{
-			if (attributes.ContainsKey(SemanticProperties.POSITION))
+			List<Task> tasks = new List<Task>();
+			
+			if (attributes.TryGetValue(SemanticProperties.POSITION, out var attributeAccessor))
 			{
-				var attributeAccessor = attributes[SemanticProperties.POSITION];
-				NumericArray resultArray = attributeAccessor.AccessorContent;
-				LoadBufferView(attributeAccessor, out NativeArray<byte> bufferViewCache);
-				attributeAccessor.AccessorId.Value.AsVertexArray(ref resultArray, bufferViewCache);
+				tasks.Add(Task.Run(() =>
+				{
+					NumericArray resultArray = attributeAccessor.AccessorContent;
+					LoadBufferView(attributeAccessor, out NativeArray<byte> bufferViewCache);
+					attributeAccessor.AccessorId.Value.AsVertexArray(ref resultArray, bufferViewCache);
 
-				if (sparseAccessors.TryGetValue(SemanticProperties.POSITION, out var sparseData))
-					ApplySparseAccessorsVec3(ref resultArray, attributeAccessor, sparseData.sparseValues, sparseData.sparseIndices);
+					if (sparseAccessors.TryGetValue(SemanticProperties.POSITION, out var sparseData))
+						ApplySparseAccessorsVec3(ref resultArray, attributeAccessor, sparseData.sparseValues,
+							sparseData.sparseIndices);
 
-				attributeAccessor.AccessorContent = resultArray;
+					attributeAccessor.AccessorContent = resultArray;
+				}));
 			}
-			if (attributes.ContainsKey(SemanticProperties.INDICES))
+			if (attributes.TryGetValue(SemanticProperties.INDICES, out var attributeAccessorIndices))
 			{
-				var attributeAccessor = attributes[SemanticProperties.INDICES];
-				NumericArray resultArray = attributeAccessor.AccessorContent;
-				LoadBufferView(attributeAccessor, out NativeArray<byte> bufferViewCache);
-				attributeAccessor.AccessorId.Value.AsTriangles(ref resultArray, bufferViewCache);
-				attributeAccessor.AccessorContent = resultArray;
+				tasks.Add(Task.Run(() =>
+				{
+					NumericArray resultArray = attributeAccessorIndices.AccessorContent;
+					LoadBufferView(attributeAccessorIndices, out NativeArray<byte> bufferViewCache);
+					attributeAccessorIndices.AccessorId.Value.AsTriangles(ref resultArray, bufferViewCache);
+					attributeAccessorIndices.AccessorContent = resultArray;
+				}));
 			}
-			if (attributes.ContainsKey(SemanticProperties.NORMAL))
+			if (attributes.TryGetValue(SemanticProperties.NORMAL, out var attributeAccessorNormals))
 			{
-				var attributeAccessor = attributes[SemanticProperties.NORMAL];
-				NumericArray resultArray = attributeAccessor.AccessorContent;
-				LoadBufferView(attributeAccessor, out NativeArray<byte> bufferViewCache);
-				attributeAccessor.AccessorId.Value.AsNormalArray(ref resultArray, bufferViewCache);
+				tasks.Add(Task.Run(() =>
+				{
+					NumericArray resultArray = attributeAccessorNormals.AccessorContent;
+					LoadBufferView(attributeAccessorNormals, out NativeArray<byte> bufferViewCache);
+					attributeAccessorNormals.AccessorId.Value.AsNormalArray(ref resultArray, bufferViewCache);
 
-				if (sparseAccessors.TryGetValue(SemanticProperties.NORMAL, out var sparseData))
-					ApplySparseAccessorsVec3(ref resultArray, attributeAccessor, sparseData.sparseValues, sparseData.sparseIndices);
+					if (sparseAccessors.TryGetValue(SemanticProperties.NORMAL, out var sparseData))
+						ApplySparseAccessorsVec3(ref resultArray, attributeAccessorNormals, sparseData.sparseValues, sparseData.sparseIndices);
 
-				attributeAccessor.AccessorContent = resultArray;
+					attributeAccessorNormals.AccessorContent = resultArray;
+				}));
 			}
-			if (attributes.ContainsKey(SemanticProperties.TexCoord[0]))
+
+			for (int i = 0; i < SemanticProperties.TexCoord.Length; i++)
 			{
-				var attributeAccessor = attributes[SemanticProperties.TexCoord[0]];
-				NumericArray resultArray = attributeAccessor.AccessorContent;
-				LoadBufferView(attributeAccessor, out NativeArray<byte> bufferViewCache);
-				attributeAccessor.AccessorId.Value.AsTexcoordArray(ref resultArray, bufferViewCache);
+				if (attributes.TryGetValue(SemanticProperties.TexCoord[i], out var attributeAccessorTexCoord))
+				{
+					tasks.Add(Task.Run(() =>
+					{
+						NumericArray resultArray = attributeAccessorTexCoord.AccessorContent;
+						LoadBufferView(attributeAccessorTexCoord, out NativeArray<byte> bufferViewCache);
+						attributeAccessorTexCoord.AccessorId.Value.AsTexcoordArray(ref resultArray, bufferViewCache);
 
-				// if (sparseAccessors.TryGetValue(SemanticProperties.TexCoord[0], out var sparseData))
-				// 	ApplySparseAccessorsTexCoord(ref resultArray, attributeAccessor, sparseData.sparseValues, sparseData.sparseIndices);
+						// if (sparseAccessors.TryGetValue(SemanticProperties.TexCoord[0], out var sparseData))
+						// 	ApplySparseAccessorsTexCoord(ref resultArray, attributeAccessor, sparseData.sparseValues, sparseData.sparseIndices);
 
-				attributeAccessor.AccessorContent = resultArray;
+						attributeAccessorTexCoord.AccessorContent = resultArray;
+					}));
+				}
 			}
-			if (attributes.ContainsKey(SemanticProperties.TexCoord[1]))
+
+			for (int i = 0; i < SemanticProperties.Color.Length; i++)
 			{
-				var attributeAccessor = attributes[SemanticProperties.TexCoord[1]];
-				NumericArray resultArray = attributeAccessor.AccessorContent;
-				LoadBufferView(attributeAccessor, out NativeArray<byte> bufferViewCache);
-				attributeAccessor.AccessorId.Value.AsTexcoordArray(ref resultArray, bufferViewCache);
+				if (attributes.TryGetValue(SemanticProperties.Color[i], out var attributeAccessorColor))
+				{
+					tasks.Add(Task.Run(() =>
+					{
+						NumericArray resultArray = attributeAccessorColor.AccessorContent;
+						LoadBufferView(attributeAccessorColor, out NativeArray<byte> bufferViewCache);
+						attributeAccessorColor.AccessorId.Value.AsColorArray(ref resultArray, bufferViewCache);
 
-				// if (sparseAccessors.TryGetValue(SemanticProperties.TexCoord[1], out var sparseData))
-				// 	ApplySparseAccessorsTexCoord(ref resultArray, attributeAccessor, sparseData.sparseValues, sparseData.sparseIndices);
+						// if (sparseAccessors.TryGetValue(SemanticProperties.Color[0], out var sparseData))
+						// 	ApplySparseAccessorsColor(ref resultArray, attributeAccessor, sparseData.sparseValues, sparseData.sparseIndices);
 
-				attributeAccessor.AccessorContent = resultArray;
+						attributeAccessorColor.AccessorContent = resultArray;
+					}));
+				}
 			}
-			if (attributes.ContainsKey(SemanticProperties.TexCoord[2]))
+			
+			if (attributes.TryGetValue(SemanticProperties.TANGENT, out var attributeAccessorTangent))
 			{
-				var attributeAccessor = attributes[SemanticProperties.TexCoord[2]];
-				NumericArray resultArray = attributeAccessor.AccessorContent;
-				LoadBufferView(attributeAccessor, out NativeArray<byte> bufferViewCache);
-				attributeAccessor.AccessorId.Value.AsTexcoordArray(ref resultArray, bufferViewCache);
+				tasks.Add(Task.Run(() =>
+				{
+					NumericArray resultArray = attributeAccessorTangent.AccessorContent;
+					LoadBufferView(attributeAccessorTangent, out NativeArray<byte> bufferViewCache);
+					attributeAccessorTangent.AccessorId.Value.AsTangentArray(ref resultArray, bufferViewCache);
 
-				// if (sparseAccessors.TryGetValue(SemanticProperties.TexCoord[2], out var sparseData))
-				// 	ApplySparseAccessorsTexCoord(ref resultArray, attributeAccessor, sparseData.sparseValues, sparseData.sparseIndices);
+					// if (sparseAccessors.TryGetValue(SemanticProperties.TANGENT, out var sparseData))
+					// 	ApplySparseAccessorsTangent(ref resultArray, attributeAccessor, sparseData.sparseValues, sparseData.sparseIndices);
 
-				attributeAccessor.AccessorContent = resultArray;
+					attributeAccessorTangent.AccessorContent = resultArray;
+				}));
 			}
-			if (attributes.ContainsKey(SemanticProperties.TexCoord[3]))
+
+			for (int i = 0; i < SemanticProperties.Weight.Length; i++)
 			{
-				var attributeAccessor = attributes[SemanticProperties.TexCoord[3]];
-				NumericArray resultArray = attributeAccessor.AccessorContent;
-				LoadBufferView(attributeAccessor, out NativeArray<byte> bufferViewCache);
-				attributeAccessor.AccessorId.Value.AsTexcoordArray(ref resultArray, bufferViewCache);
+				if (attributes.TryGetValue(SemanticProperties.Weight[i], out var attributeAccessorWeight))
+				{
+					tasks.Add(Task.Run(() =>
+					{
+						NumericArray resultArray = attributeAccessorWeight.AccessorContent;
+						LoadBufferView(attributeAccessorWeight, out NativeArray<byte> bufferViewCache);
+						attributeAccessorWeight.AccessorId.Value.AsFloat4Array(ref resultArray, bufferViewCache);
+						attributeAccessorWeight.AccessorContent = resultArray;
+					}));
+				}
+			}
 
-				// if (sparseAccessors.TryGetValue(SemanticProperties.TexCoord[3], out var sparseData))
-				// 	ApplySparseAccessorsTexCoord(ref resultArray, attributeAccessor, sparseData.sparseValues, sparseData.sparseIndices);
+			for (int i = 0; i < SemanticProperties.Joint.Length; i++)
+			{
+				if (attributes.TryGetValue(SemanticProperties.Joint[0], out var attributeAccessorJoint))
+				{
+					tasks.Add(Task.Run(() =>
+					{
+						NumericArray resultArray = attributeAccessorJoint.AccessorContent;
+						LoadBufferView(attributeAccessorJoint, out NativeArray<byte> bufferViewCache);
+						attributeAccessorJoint.AccessorId.Value.AsFloat4Array(ref resultArray, bufferViewCache, 0,
+							false);
+						attributeAccessorJoint.AccessorContent = resultArray;
+					}));
+				}
+			}
 
-				attributeAccessor.AccessorContent = resultArray;
-			}
-			if (attributes.ContainsKey(SemanticProperties.Color[0]))
-			{
-				var attributeAccessor = attributes[SemanticProperties.Color[0]];
-				NumericArray resultArray = attributeAccessor.AccessorContent;
-				LoadBufferView(attributeAccessor, out NativeArray<byte> bufferViewCache);
-				attributeAccessor.AccessorId.Value.AsColorArray(ref resultArray, bufferViewCache);
-
-				// if (sparseAccessors.TryGetValue(SemanticProperties.Color[0], out var sparseData))
-				// 	ApplySparseAccessorsColor(ref resultArray, attributeAccessor, sparseData.sparseValues, sparseData.sparseIndices);
-
-				attributeAccessor.AccessorContent = resultArray;
-			}
-			if (attributes.ContainsKey(SemanticProperties.TANGENT))
-			{
-				var attributeAccessor = attributes[SemanticProperties.TANGENT];
-				NumericArray resultArray = attributeAccessor.AccessorContent;
-				LoadBufferView(attributeAccessor, out NativeArray<byte> bufferViewCache);
-				attributeAccessor.AccessorId.Value.AsTangentArray(ref resultArray, bufferViewCache);
-
-				// if (sparseAccessors.TryGetValue(SemanticProperties.TANGENT, out var sparseData))
-				// 	ApplySparseAccessorsTangent(ref resultArray, attributeAccessor, sparseData.sparseValues, sparseData.sparseIndices);
-
-				attributeAccessor.AccessorContent = resultArray;
-			}
-			if (attributes.ContainsKey(SemanticProperties.Weight[0]))
-			{
-				var attributeAccessor = attributes[SemanticProperties.Weight[0]];
-				NumericArray resultArray = attributeAccessor.AccessorContent;
-				LoadBufferView(attributeAccessor, out NativeArray<byte> bufferViewCache);
-				attributeAccessor.AccessorId.Value.AsFloat4Array(ref resultArray, bufferViewCache);
-				attributeAccessor.AccessorContent = resultArray;
-			}
-			if (attributes.ContainsKey(SemanticProperties.Weight[1]))
-			{
-				var attributeAccessor = attributes[SemanticProperties.Weight[1]];
-				NumericArray resultArray = attributeAccessor.AccessorContent;
-				LoadBufferView(attributeAccessor, out NativeArray<byte> bufferViewCache);
-				attributeAccessor.AccessorId.Value.AsFloat4Array(ref resultArray, bufferViewCache);
-				attributeAccessor.AccessorContent = resultArray;
-			}
-			if (attributes.ContainsKey(SemanticProperties.Joint[0]))
-			{
-				var attributeAccessor = attributes[SemanticProperties.Joint[0]];
-				NumericArray resultArray = attributeAccessor.AccessorContent;
-				LoadBufferView(attributeAccessor, out NativeArray<byte> bufferViewCache);
-				attributeAccessor.AccessorId.Value.AsFloat4Array(ref resultArray, bufferViewCache,0, false);
-				attributeAccessor.AccessorContent = resultArray;
-			}
-			if (attributes.ContainsKey(SemanticProperties.Joint[1]))
-			{
-				var attributeAccessor = attributes[SemanticProperties.Joint[1]];
-				NumericArray resultArray = attributeAccessor.AccessorContent;
-				LoadBufferView(attributeAccessor, out NativeArray<byte> bufferViewCache);
-				attributeAccessor.AccessorId.Value.AsFloat4Array(ref resultArray, bufferViewCache, 0, false);
-				attributeAccessor.AccessorContent = resultArray;
-			}
+			await Task.WhenAll(tasks);
 		}
 
 		public static void BuildTargetAttributes(ref Dictionary<string, AttributeAccessor> attributes)
