@@ -565,20 +565,12 @@ namespace UnityGLTF
 			var newTargets = new List<Dictionary<string, AttributeAccessor>>(primitive.Targets.Count);
 			_assetCache.MeshCache[meshIndex].Primitives[primitiveIndex].Targets = newTargets;
 
+			// Prepare Buffer Data
 			for (int i = 0; i < primitive.Targets.Count; i++)
 			{
 				var target = primitive.Targets[i];
 				newTargets.Add(new Dictionary<string, AttributeAccessor>());
 
-				NumericArray[] sparseNormals = null;
-				NumericArray[] sparsePositions = null;
-				NumericArray[] sparseTangents = null;
-
-				const string NormalKey = "NORMAL";
-				const string PositionKey = "POSITION";
-				const string TangentKey = "TANGENT";
-
-				// normals, positions, tangents
 				foreach (var targetAttribute in target)
 				{
 					BufferId bufferIdPair = null;
@@ -596,9 +588,9 @@ namespace UnityGLTF
 						bufferIdPair = primitive.Attributes[targetAttribute.Key].Value.BufferView.Value.Buffer;
 						targetAttribute.Value.Value.BufferView = primitive.Attributes[targetAttribute.Key].Value.BufferView;
 					}
+					
 					GLTFBuffer buffer = bufferIdPair.Value;
 					int bufferID = bufferIdPair.Id;
-
 					if (_assetCache.BufferCache[bufferID] == null)
 					{
 						await ConstructBuffer(buffer, bufferID);
@@ -610,93 +602,153 @@ namespace UnityGLTF
 						bufferData = _assetCache.BufferCache[bufferID].bufferData,
 						Offset = (uint)_assetCache.BufferCache[bufferID].ChunkOffset
 					};
-
+					
 					// if this buffer isn't sparse, we're done here
 					if (targetAttribute.Value.Value.Sparse == null) continue;
-
-					// Values
+					
 					var bufferId = targetAttribute.Value.Value.Sparse.Values.BufferView.Value.Buffer;
-					var bufferData = await GetBufferData(bufferId);
-					AttributeAccessor sparseValues = new AttributeAccessor
-					{
-						AccessorId = targetAttribute.Value,
-						bufferData = bufferData.bufferData,
-						Offset = (uint)bufferData.ChunkOffset
-					};
-					GLTFHelpers.LoadBufferView(sparseValues.AccessorId.Value.Sparse.Values.BufferView.Value, sparseValues.Offset, sparseValues.bufferData, out NativeArray<byte> bufferViewCache1);
-
-					// Indices
+					await GetBufferData(bufferId);					
+					
 					bufferId = targetAttribute.Value.Value.Sparse.Indices.BufferView.Value.Buffer;
-					bufferData = await GetBufferData(bufferId);
-					AttributeAccessor sparseIndices = new AttributeAccessor
-					{
-						AccessorId = targetAttribute.Value,
-						bufferData = bufferData.bufferData,
-						Offset = (uint)bufferData.ChunkOffset
-					};
-					GLTFHelpers.LoadBufferView(sparseIndices.AccessorId.Value.Sparse.Indices.BufferView.Value, sparseIndices.Offset, sparseIndices.bufferData, out NativeArray<byte> bufferViewCache2);
-
-					switch (targetAttribute.Key)
-					{
-						case NormalKey:
-							sparseNormals = new NumericArray[2];
-							Accessor.AsSparseVector3Array(targetAttribute.Value.Value, ref sparseNormals[0], bufferViewCache1);
-							Accessor.AsSparseUIntArray(targetAttribute.Value.Value, ref sparseNormals[1], bufferViewCache2);
-							break;
-						case PositionKey:
-							sparsePositions = new NumericArray[2];
-							Accessor.AsSparseVector3Array(targetAttribute.Value.Value, ref sparsePositions[0], bufferViewCache1);
-							Accessor.AsSparseUIntArray(targetAttribute.Value.Value, ref sparsePositions[1], bufferViewCache2);
-							break;
-						case TangentKey:
-							sparseTangents = new NumericArray[2];
-							Accessor.AsSparseVector3Array(targetAttribute.Value.Value, ref sparseTangents[0], bufferViewCache1);
-							Accessor.AsSparseUIntArray(targetAttribute.Value.Value, ref sparseTangents[1], bufferViewCache2);
-							break;
-					}
+					await GetBufferData(bufferId);			
 				}
-
-				var att = newTargets[i];
-				GLTFHelpers.BuildTargetAttributes(ref att);
-
-				if (sparseNormals != null)
-				{
-					var current = att[NormalKey].AccessorContent;
-					NumericArray before = new NumericArray();
-					before.AsFloats3 = new float3[current.AsFloats3.Length];
-					for (int j = 0; j < sparseNormals[1].AsUInts.Length; j++)
-					{
-						before.AsFloats3[sparseNormals[1].AsUInts[j]] = sparseNormals[0].AsFloats3[j];
-					}
-					att[NormalKey].AccessorContent = before;
-				}
-
-				if (sparsePositions != null)
-				{
-					var current = att[PositionKey].AccessorContent;
-					NumericArray before = new NumericArray();
-					before.AsFloats3 = new float3[current.AsFloats3.Length];
-					for (int j = 0; j < sparsePositions[1].AsUInts.Length; j++)
-					{
-						before.AsFloats3[sparsePositions[1].AsUInts[j]] = sparsePositions[0].AsFloats3[j];
-					}
-					att[PositionKey].AccessorContent = before;
-				}
-
-				if (sparseTangents != null)
-				{
-					var current = att[TangentKey].AccessorContent;
-					NumericArray before = new NumericArray();
-					before.AsFloats3 = new float3[current.AsFloats3.Length];
-					for (int j = 0; j < sparseTangents[1].AsUInts.Length; j++)
-					{
-						before.AsFloats3[sparseTangents[1].AsUInts[j]] = sparseTangents[0].AsFloats3[j];
-					}
-					att[TangentKey].AccessorContent = before;
-				}
-
-				TransformTargets(ref att);
 			}
+
+			List<Task> tasks = new List<Task>();
+			
+			for (int i = 0; i < primitive.Targets.Count; i++)
+			{
+				var target = primitive.Targets[i];
+				var att = newTargets[i];
+
+				void ConstructForPrimitive()
+				{
+					NumericArray[] sparseNormals = null;
+					NumericArray[] sparsePositions = null;
+					NumericArray[] sparseTangents = null;
+
+					const string NormalKey = "NORMAL";
+					const string PositionKey = "POSITION";
+					const string TangentKey = "TANGENT";
+
+					// normals, positions, tangents
+					foreach (var targetAttribute in target)
+					{
+						BufferId bufferIdPair = null;
+						if (targetAttribute.Value.Value.Sparse != null)
+						{
+							// When using Draco, it's possible the BufferView is null
+							if (primitive.Attributes[targetAttribute.Key].Value.BufferView == null)
+							{
+								continue;
+							}
+						}
+
+						// if this buffer isn't sparse, we're done here
+						if (targetAttribute.Value.Value.Sparse == null) continue;
+
+						// Values
+						var bufferId = targetAttribute.Value.Value.Sparse.Values.BufferView.Value.Buffer;
+						var bufferData = _assetCache.BufferCache[bufferId.Id];
+						AttributeAccessor sparseValues = new AttributeAccessor
+						{
+							AccessorId = targetAttribute.Value,
+							bufferData = bufferData.bufferData,
+							Offset = (uint)bufferData.ChunkOffset
+						};
+						GLTFHelpers.LoadBufferView(sparseValues.AccessorId.Value.Sparse.Values.BufferView.Value,
+							sparseValues.Offset, sparseValues.bufferData, out NativeArray<byte> bufferViewCache1);
+
+						// Indices
+						bufferId = targetAttribute.Value.Value.Sparse.Indices.BufferView.Value.Buffer;
+						bufferData = _assetCache.BufferCache[bufferId.Id];
+						AttributeAccessor sparseIndices = new AttributeAccessor
+						{
+							AccessorId = targetAttribute.Value,
+							bufferData = bufferData.bufferData,
+							Offset = (uint)bufferData.ChunkOffset,
+						};
+						GLTFHelpers.LoadBufferView(sparseIndices.AccessorId.Value.Sparse.Indices.BufferView.Value,
+							sparseIndices.Offset, sparseIndices.bufferData, out NativeArray<byte> bufferViewCache2);
+
+						switch (targetAttribute.Key)
+						{
+							case NormalKey:
+								sparseNormals = new NumericArray[2];
+								Accessor.AsSparseVector3Array(targetAttribute.Value.Value, ref sparseNormals[0],
+									bufferViewCache1);
+								Accessor.AsSparseUIntArray(targetAttribute.Value.Value, ref sparseNormals[1],
+									bufferViewCache2);
+								break;
+							case PositionKey:
+								sparsePositions = new NumericArray[2];
+								Accessor.AsSparseVector3Array(targetAttribute.Value.Value, ref sparsePositions[0],
+									bufferViewCache1);
+								Accessor.AsSparseUIntArray(targetAttribute.Value.Value, ref sparsePositions[1],
+									bufferViewCache2);
+								break;
+							case TangentKey:
+								sparseTangents = new NumericArray[2];
+								Accessor.AsSparseVector3Array(targetAttribute.Value.Value, ref sparseTangents[0],
+									bufferViewCache1);
+								Accessor.AsSparseUIntArray(targetAttribute.Value.Value, ref sparseTangents[1],
+									bufferViewCache2);
+								break;
+						}
+					}
+
+					GLTFHelpers.BuildTargetAttributes(ref att);
+
+					if (sparseNormals != null)
+					{
+						var current = att[NormalKey].AccessorContent;
+						NumericArray before = new NumericArray();
+						before.AsFloats3 = new float3[current.AsFloats3.Length];
+						for (int j = 0; j < sparseNormals[1].AsUInts.Length; j++)
+						{
+							before.AsFloats3[sparseNormals[1].AsUInts[j]] = sparseNormals[0].AsFloats3[j];
+						}
+
+						att[NormalKey].AccessorContent = before;
+					}
+
+					if (sparsePositions != null)
+					{
+						var current = att[PositionKey].AccessorContent;
+						NumericArray before = new NumericArray();
+						before.AsFloats3 = new float3[current.AsFloats3.Length];
+						for (int j = 0; j < sparsePositions[1].AsUInts.Length; j++)
+						{
+							before.AsFloats3[sparsePositions[1].AsUInts[j]] = sparsePositions[0].AsFloats3[j];
+						}
+
+						att[PositionKey].AccessorContent = before;
+					}
+
+					if (sparseTangents != null)
+					{
+						var current = att[TangentKey].AccessorContent;
+						NumericArray before = new NumericArray();
+						before.AsFloats3 = new float3[current.AsFloats3.Length];
+						for (int j = 0; j < sparseTangents[1].AsUInts.Length; j++)
+						{
+							before.AsFloats3[sparseTangents[1].AsUInts[j]] = sparseTangents[0].AsFloats3[j];
+						}
+
+						att[TangentKey].AccessorContent = before;
+					}
+
+					TransformTargets(ref att);
+				}
+				
+				if (IsMultithreaded)
+					tasks.Add(Task.Run(() => ConstructForPrimitive()));
+				else 
+					ConstructForPrimitive();
+
+			}
+
+			await Task.WhenAll(tasks);
 		}
 
 		private async Task ConstructMeshAttributes(GLTFMesh mesh, MeshId meshId)
@@ -803,8 +855,6 @@ namespace UnityGLTF
 			uint vertOffset,
 			int indexOffset)
 		{
-			
-			// todo optimize: There are multiple copies being performed to turn the buffer data into mesh data. Look into reducing them
 			var meshAttributes = primData.Attributes;
 			uint vertexCount = 0;
 			if (meshAttributes.TryGetValue(SemanticProperties.POSITION, out var attribute))
