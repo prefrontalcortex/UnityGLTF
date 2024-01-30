@@ -99,15 +99,6 @@ namespace UnityGLTF.Cache
 				{
 					if (bufferCacheData != null)
 					{
-						if (bufferCacheData.Stream != null)
-						{
-#if !WINDOWS_UWP
-							bufferCacheData.Stream.Close();
-#else
-							bufferCacheData.Stream.Dispose();
-#endif
-                        }
-
                         bufferCacheData.Dispose();
 					}
 				}

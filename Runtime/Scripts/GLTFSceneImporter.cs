@@ -9,6 +9,7 @@ using System.Net;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
+using Unity.Collections;
 using UnityEngine;
 using UnityGLTF.Cache;
 using UnityGLTF.Extensions;
@@ -217,6 +218,8 @@ namespace UnityGLTF
 		public GameObject[] NodeCache => _assetCache.NodeCache;
 		public MeshCacheData[] MeshCache => _assetCache.MeshCache;
 
+		private Dictionary<Stream, NativeArray<byte>> nativeBuffers = new Dictionary<Stream, NativeArray<byte>>(); 
+
 		/// <summary>
 		/// Whether to keep a CPU-side copy of the mesh after upload to GPU (for example, in case normals/tangents need recalculation)
 		/// </summary>
@@ -312,6 +315,36 @@ namespace UnityGLTF
 
 			_options = options;
 			VerifyDataLoader();
+		}
+
+		private NativeArray<byte> GetOrCreateNativeBuffer(Stream stream)
+		{
+			if (nativeBuffers.TryGetValue(stream, out var buffer))
+			{
+				return buffer;
+			}
+
+			var buf = new byte[stream.Length];
+
+			stream.Position = 0;
+			long remainingSize = stream.Length;
+			while (remainingSize != 0)
+			{
+				int sizeToLoad = (int)System.Math.Min(remainingSize, int.MaxValue);
+				sizeToLoad = stream.Read(buf, (int)(stream.Length - remainingSize), sizeToLoad);
+				remainingSize -= (uint)sizeToLoad;
+
+				if (sizeToLoad == 0 && remainingSize > 0)
+				{
+					throw new Exception("Unexpected end of stream while loading buffer view");
+				}
+			}			
+			
+			var newNativeBuffer = new NativeArray<byte>(buf, Allocator.Persistent);
+			
+			nativeBuffers.Add(stream,newNativeBuffer);
+			
+			return newNativeBuffer;
 		}
 
 		private void VerifyDataLoader()
@@ -961,7 +994,8 @@ namespace UnityGLTF
 				if (_assetCache.BufferCache[bufferIndex] != null) Debug.Log(LogType.Error, "_assetCache.BufferCache[bufferIndex] != null;");
 				_assetCache.BufferCache[bufferIndex] = new BufferCacheData
 				{
-					Stream = bufferDataStream
+					Stream = bufferDataStream,
+					bufferData = GetOrCreateNativeBuffer(bufferDataStream)
 				};
 
 				progressStatus.BuffersLoaded++;
@@ -1094,7 +1128,8 @@ namespace UnityGLTF
 			return new BufferCacheData
 			{
 				Stream = _gltfStream.Stream,
-				ChunkOffset = (uint)_gltfStream.Stream.Position
+				ChunkOffset = (uint)_gltfStream.Stream.Position,
+				bufferData = GetOrCreateNativeBuffer(_gltfStream.Stream),
 			};
 		}
 

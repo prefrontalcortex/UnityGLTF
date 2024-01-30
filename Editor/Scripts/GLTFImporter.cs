@@ -818,6 +818,8 @@ namespace UnityGLTF
 		        Debug.LogWarning("Some Textures have incorrect linear/sRGB settings. Use the \"Fix All\" button in the importer to adjust.");
 		        
 		}
+	        if (context.SceneImporter != null)
+		        context.SceneImporter.Dispose();
 
         private const string ColorSpaceDependency = nameof(GLTFImporter) + "_" + nameof(PlayerSettings.colorSpace);
         private const string NormalMapEncodingDependency = nameof(GLTFImporter) + "_normalMapEncoding";
