@@ -61,7 +61,14 @@ namespace UnityGLTF
 			{
 				if (Context.TryGetPlugin<DracoImportContext>(out _))
 				{
-					await ConstructDracoMesh(mesh, meshIndex, cancellationToken);
+					await PrepareDracoMesh(mesh, meshIndex);
+					var dracoTask = ConstructDracoMesh(mesh, meshIndex, cancellationToken);
+					await Task.WhenAll( dracoTask.Item2);
+					for (int i = 0; i < dracoTask.Item2.Length; i++)
+					{
+						_assetCache.MeshCache[meshIndex].DracoMeshDecodeResult[i] = dracoTask.Item2[i].Result;
+					}
+					await BuildUnityDracoMesh(mesh, meshIndex);
 					return;
 				}
 				else
@@ -136,17 +143,22 @@ namespace UnityGLTF
 		}
 
 #if HAVE_DRACO
-		protected virtual async Task ConstructDracoMesh(GLTFMesh mesh, int meshIndex, CancellationToken cancellationToken)
+		protected virtual async Task PrepareDracoMesh(GLTFMesh mesh, int meshIndex)
 		{
-			var firstPrim = mesh.Primitives.Count > 0 ?  mesh.Primitives[0] : null;
+			if (_assetCache.MeshCache[meshIndex].DracoMeshDataPrepared)
+				return;
+			
 			Mesh.MeshDataArray meshDataArray = Mesh.AllocateWritableMeshData(mesh.Primitives.Count);
-			var dracoDecodeResults = new DecodeResult[mesh.Primitives.Count];
+			_assetCache.MeshCache[meshIndex].DracoMeshData = meshDataArray;
+
+			_assetCache.MeshCache[meshIndex].DracoMeshDecodeResult = new DecodeResult[mesh.Primitives.Count];
+
+			_assetCache.MeshCache[meshIndex].DracoMeshDataPrepared = true;
 			for (int i = 0; i < mesh.Primitives.Count; i++)
 			{
 				var primitive = mesh.Primitives[i];
 				if (primitive.Extensions == null || !primitive.Extensions.ContainsKey("KHR_draco_mesh_compression"))
 					continue;
-
 
 				if (primitive.Extensions.TryGetValue("KHR_draco_mesh_compression", out var extension))
 				{
@@ -154,7 +166,39 @@ namespace UnityGLTF
 					if (_assetCache.BufferCache[dracoExtension.bufferView.Value.Buffer.Id] == null)
 						await ConstructBuffer(dracoExtension.bufferView.Value.Buffer.Value,
 							dracoExtension.bufferView.Value.Buffer.Id);
+				}
+			}
+		}
+		
+		protected virtual (int,Task<DecodeResult>[]) ConstructDracoMesh(GLTFMesh mesh, int meshIndex, CancellationToken cancellationToken)
+		{
+			var firstPrim = mesh.Primitives.Count > 0 ?  mesh.Primitives[0] : null;
 
+			(int, Task<DecodeResult>[]) taskResult = new (meshIndex, new Task<DecodeResult>[_assetCache.MeshCache[meshIndex].DracoMeshDecodeResult.Length]);
+			
+			if (!_assetCache.MeshCache[meshIndex].DracoMeshDataPrepared)
+			{
+				Debug.LogError("Draco Mesh Data is not prepared! Call PrepareDracoMesh first", this);
+				return new (meshIndex, new Task<DecodeResult>[0]);
+			}
+
+			if (_assetCache.MeshCache[meshIndex].HasDracoMeshData)
+			{
+				return new (meshIndex, new Task<DecodeResult>[0]);
+			}
+
+			_assetCache.MeshCache[meshIndex].HasDracoMeshData = true;
+
+			for (int i = 0; i < mesh.Primitives.Count; i++)
+			{
+				var primitive = mesh.Primitives[i];
+				if (primitive.Extensions == null || !primitive.Extensions.ContainsKey("KHR_draco_mesh_compression"))
+					continue;
+				
+				if (primitive.Extensions.TryGetValue("KHR_draco_mesh_compression", out var extension))
+				{
+					var dracoExtension = (KHR_draco_mesh_compression)extension;
+	
 					BufferCacheData bufferContents =
 						_assetCache.BufferCache[dracoExtension.bufferView.Value.Buffer.Id];
 
@@ -186,30 +230,33 @@ namespace UnityGLTF
 					if (firstPrim != null && firstPrim.Targets != null)
 						decodeSettings |= DecodeSettings.ForceUnityVertexLayout;
 					
-					dracoDecodeResults[i] = await DracoDecoder.DecodeMesh(meshDataArray[i], bufferViewData, decodeSettings, DracoDecoder.CreateAttributeIdMap(weightsAttributeId, jointsAttributeId));
+					taskResult.Item2[i] = DracoDecoder.DecodeMesh( _assetCache.MeshCache[meshIndex].DracoMeshData[i], bufferViewData, decodeSettings, DracoDecoder.CreateAttributeIdMap(weightsAttributeId, jointsAttributeId));
 					
 #else
 					var draco = new DracoMeshLoader();
 
-					dracoDecodeResults[i] = await draco.ConvertDracoMeshToUnity(meshDataArray[i], bufferViewData,
+					taskResult.Item2[i] = draco.ConvertDracoMeshToUnity(_assetCache.MeshCache[meshIndex].DracoMeshData[i], bufferViewData,
 						needsNormals, needsTangents,
 						weightsAttributeId, jointsAttributeId, firstPrim.Targets != null);
 #endif
-					if (!dracoDecodeResults[i].success)
-					{
-						Debug.LogError("Error decoding draco mesh", this);
-						meshDataArray.Dispose();
-						return;
-					}
-
-					Statistics.VertexCount += meshDataArray[i].vertexCount;
-
-					await CreateMaterials(primitive);
 				}
 			}
 
-			// Combine sub meshes
-			await ConstructUnityMesh(mesh, dracoDecodeResults, meshDataArray, meshIndex, mesh.Name);
+			return taskResult;
+		}
+
+		private async Task BuildUnityDracoMesh(GLTFMesh mesh, int meshIndex)
+		{
+			if (!_assetCache.MeshCache[meshIndex].HasDracoMeshData)
+			{
+				Debug.LogError("Draco Mesh Data is not decoded! Call ConstructDracoMesh first", this);
+				return;
+			}
+			
+			foreach (var primitive in mesh.Primitives)
+				await CreateMaterials(primitive);
+			
+			await ConstructUnityMesh(mesh, _assetCache.MeshCache[meshIndex].DracoMeshDecodeResult, _assetCache.MeshCache[meshIndex].DracoMeshData, meshIndex, mesh.Name);
 		}
 #endif
 
@@ -560,7 +607,7 @@ namespace UnityGLTF
 			}
 		}
 
-		protected virtual async Task ConstructMeshTargets(MeshPrimitive primitive, int meshIndex, int primitiveIndex)
+		protected virtual async Task ConstructMeshTargetsPrepareBuffers(MeshPrimitive primitive, int meshIndex, int primitiveIndex)
 		{
 			var newTargets = new List<Dictionary<string, AttributeAccessor>>(primitive.Targets.Count);
 			_assetCache.MeshCache[meshIndex].Primitives[primitiveIndex].Targets = newTargets;
@@ -585,10 +632,12 @@ namespace UnityGLTF
 						{
 							continue;
 						}
+
 						bufferIdPair = primitive.Attributes[targetAttribute.Key].Value.BufferView.Value.Buffer;
-						targetAttribute.Value.Value.BufferView = primitive.Attributes[targetAttribute.Key].Value.BufferView;
+						targetAttribute.Value.Value.BufferView =
+							primitive.Attributes[targetAttribute.Key].Value.BufferView;
 					}
-					
+
 					GLTFBuffer buffer = bufferIdPair.Value;
 					int bufferID = bufferIdPair.Id;
 					if (_assetCache.BufferCache[bufferID] == null)
@@ -602,152 +651,240 @@ namespace UnityGLTF
 						bufferData = _assetCache.BufferCache[bufferID].bufferData,
 						Offset = (uint)_assetCache.BufferCache[bufferID].ChunkOffset
 					};
-					
+
 					// if this buffer isn't sparse, we're done here
 					if (targetAttribute.Value.Value.Sparse == null) continue;
-					
+
 					var bufferId = targetAttribute.Value.Value.Sparse.Values.BufferView.Value.Buffer;
-					await GetBufferData(bufferId);					
-					
+					await GetBufferData(bufferId);
+
 					bufferId = targetAttribute.Value.Value.Sparse.Indices.BufferView.Value.Buffer;
-					await GetBufferData(bufferId);			
+					await GetBufferData(bufferId);
 				}
 			}
+		}
 
-			List<Task> tasks = new List<Task>();
-			
+		protected virtual async Task ConstructMeshTargetsBuild(MeshPrimitive primitive, int meshIndex, int primitiveIndex)
+		{
+			var newTargets = _assetCache.MeshCache[meshIndex].Primitives[primitiveIndex].Targets;
 			for (int i = 0; i < primitive.Targets.Count; i++)
 			{
 				var target = primitive.Targets[i];
 				var att = newTargets[i];
 
-				void ConstructForPrimitive()
+				NumericArray[] sparseNormals = null;
+				NumericArray[] sparsePositions = null;
+				NumericArray[] sparseTangents = null;
+
+				const string NormalKey = "NORMAL";
+				const string PositionKey = "POSITION";
+				const string TangentKey = "TANGENT";
+
+				// normals, positions, tangents
+				foreach (var targetAttribute in target)
 				{
-					NumericArray[] sparseNormals = null;
-					NumericArray[] sparsePositions = null;
-					NumericArray[] sparseTangents = null;
-
-					const string NormalKey = "NORMAL";
-					const string PositionKey = "POSITION";
-					const string TangentKey = "TANGENT";
-
-					// normals, positions, tangents
-					foreach (var targetAttribute in target)
+					if (targetAttribute.Value.Value.Sparse != null)
 					{
-						BufferId bufferIdPair = null;
-						if (targetAttribute.Value.Value.Sparse != null)
+						// When using Draco, it's possible the BufferView is null
+						if (primitive.Attributes[targetAttribute.Key].Value.BufferView == null)
 						{
-							// When using Draco, it's possible the BufferView is null
-							if (primitive.Attributes[targetAttribute.Key].Value.BufferView == null)
-							{
-								continue;
-							}
-						}
-
-						// if this buffer isn't sparse, we're done here
-						if (targetAttribute.Value.Value.Sparse == null) continue;
-
-						// Values
-						var bufferId = targetAttribute.Value.Value.Sparse.Values.BufferView.Value.Buffer;
-						var bufferData = _assetCache.BufferCache[bufferId.Id];
-						AttributeAccessor sparseValues = new AttributeAccessor
-						{
-							AccessorId = targetAttribute.Value,
-							bufferData = bufferData.bufferData,
-							Offset = (uint)bufferData.ChunkOffset
-						};
-						GLTFHelpers.LoadBufferView(sparseValues.AccessorId.Value.Sparse.Values.BufferView.Value,
-							sparseValues.Offset, sparseValues.bufferData, out NativeArray<byte> bufferViewCache1);
-
-						// Indices
-						bufferId = targetAttribute.Value.Value.Sparse.Indices.BufferView.Value.Buffer;
-						bufferData = _assetCache.BufferCache[bufferId.Id];
-						AttributeAccessor sparseIndices = new AttributeAccessor
-						{
-							AccessorId = targetAttribute.Value,
-							bufferData = bufferData.bufferData,
-							Offset = (uint)bufferData.ChunkOffset,
-						};
-						GLTFHelpers.LoadBufferView(sparseIndices.AccessorId.Value.Sparse.Indices.BufferView.Value,
-							sparseIndices.Offset, sparseIndices.bufferData, out NativeArray<byte> bufferViewCache2);
-
-						switch (targetAttribute.Key)
-						{
-							case NormalKey:
-								sparseNormals = new NumericArray[2];
-								Accessor.AsSparseVector3Array(targetAttribute.Value.Value, ref sparseNormals[0],
-									bufferViewCache1);
-								Accessor.AsSparseUIntArray(targetAttribute.Value.Value, ref sparseNormals[1],
-									bufferViewCache2);
-								break;
-							case PositionKey:
-								sparsePositions = new NumericArray[2];
-								Accessor.AsSparseVector3Array(targetAttribute.Value.Value, ref sparsePositions[0],
-									bufferViewCache1);
-								Accessor.AsSparseUIntArray(targetAttribute.Value.Value, ref sparsePositions[1],
-									bufferViewCache2);
-								break;
-							case TangentKey:
-								sparseTangents = new NumericArray[2];
-								Accessor.AsSparseVector3Array(targetAttribute.Value.Value, ref sparseTangents[0],
-									bufferViewCache1);
-								Accessor.AsSparseUIntArray(targetAttribute.Value.Value, ref sparseTangents[1],
-									bufferViewCache2);
-								break;
+							continue;
 						}
 					}
 
-					GLTFHelpers.BuildTargetAttributes(ref att);
+					// if this buffer isn't sparse, we're done here
+					if (targetAttribute.Value.Value.Sparse == null) continue;
 
-					if (sparseNormals != null)
+					// Values
+					var bufferId = targetAttribute.Value.Value.Sparse.Values.BufferView.Value.Buffer;
+					var bufferData = _assetCache.BufferCache[bufferId.Id];
+					AttributeAccessor sparseValues = new AttributeAccessor
 					{
-						var current = att[NormalKey].AccessorContent;
-						NumericArray before = new NumericArray();
-						before.AsFloats3 = new float3[current.AsFloats3.Length];
-						for (int j = 0; j < sparseNormals[1].AsUInts.Length; j++)
-						{
-							before.AsFloats3[sparseNormals[1].AsUInts[j]] = sparseNormals[0].AsFloats3[j];
-						}
+						AccessorId = targetAttribute.Value,
+						bufferData = bufferData.bufferData,
+						Offset = (uint)bufferData.ChunkOffset
+					};
+					GLTFHelpers.LoadBufferView(sparseValues.AccessorId.Value.Sparse.Values.BufferView.Value,
+						sparseValues.Offset, sparseValues.bufferData, out NativeArray<byte> bufferViewCache1);
 
-						att[NormalKey].AccessorContent = before;
+					// Indices
+					bufferId = targetAttribute.Value.Value.Sparse.Indices.BufferView.Value.Buffer;
+					bufferData = _assetCache.BufferCache[bufferId.Id];
+					AttributeAccessor sparseIndices = new AttributeAccessor
+					{
+						AccessorId = targetAttribute.Value,
+						bufferData = bufferData.bufferData,
+						Offset = (uint)bufferData.ChunkOffset,
+					};
+					GLTFHelpers.LoadBufferView(sparseIndices.AccessorId.Value.Sparse.Indices.BufferView.Value,
+						sparseIndices.Offset, sparseIndices.bufferData, out NativeArray<byte> bufferViewCache2);
+
+					switch (targetAttribute.Key)
+					{
+						case NormalKey:
+							sparseNormals = new NumericArray[2];
+							Accessor.AsSparseVector3Array(targetAttribute.Value.Value, ref sparseNormals[0],
+								bufferViewCache1);
+							Accessor.AsSparseUIntArray(targetAttribute.Value.Value, ref sparseNormals[1],
+								bufferViewCache2);
+							break;
+						case PositionKey:
+							sparsePositions = new NumericArray[2];
+							Accessor.AsSparseVector3Array(targetAttribute.Value.Value, ref sparsePositions[0],
+								bufferViewCache1);
+							Accessor.AsSparseUIntArray(targetAttribute.Value.Value, ref sparsePositions[1],
+								bufferViewCache2);
+							break;
+						case TangentKey:
+							sparseTangents = new NumericArray[2];
+							Accessor.AsSparseVector3Array(targetAttribute.Value.Value, ref sparseTangents[0],
+								bufferViewCache1);
+							Accessor.AsSparseUIntArray(targetAttribute.Value.Value, ref sparseTangents[1],
+								bufferViewCache2);
+							break;
+					}
+				}
+
+				GLTFHelpers.BuildTargetAttributes(ref att);
+
+				if (sparseNormals != null)
+				{
+					var current = att[NormalKey].AccessorContent;
+					NumericArray before = new NumericArray();
+					before.AsFloats3 = new float3[current.AsFloats3.Length];
+					for (int j = 0; j < sparseNormals[1].AsUInts.Length; j++)
+					{
+						before.AsFloats3[sparseNormals[1].AsUInts[j]] = sparseNormals[0].AsFloats3[j];
 					}
 
-					if (sparsePositions != null)
-					{
-						var current = att[PositionKey].AccessorContent;
-						NumericArray before = new NumericArray();
-						before.AsFloats3 = new float3[current.AsFloats3.Length];
-						for (int j = 0; j < sparsePositions[1].AsUInts.Length; j++)
-						{
-							before.AsFloats3[sparsePositions[1].AsUInts[j]] = sparsePositions[0].AsFloats3[j];
-						}
+					att[NormalKey].AccessorContent = before;
+				}
 
-						att[PositionKey].AccessorContent = before;
+				if (sparsePositions != null)
+				{
+					var current = att[PositionKey].AccessorContent;
+					NumericArray before = new NumericArray();
+					before.AsFloats3 = new float3[current.AsFloats3.Length];
+					for (int j = 0; j < sparsePositions[1].AsUInts.Length; j++)
+					{
+						before.AsFloats3[sparsePositions[1].AsUInts[j]] = sparsePositions[0].AsFloats3[j];
 					}
 
-					if (sparseTangents != null)
-					{
-						var current = att[TangentKey].AccessorContent;
-						NumericArray before = new NumericArray();
-						before.AsFloats3 = new float3[current.AsFloats3.Length];
-						for (int j = 0; j < sparseTangents[1].AsUInts.Length; j++)
-						{
-							before.AsFloats3[sparseTangents[1].AsUInts[j]] = sparseTangents[0].AsFloats3[j];
-						}
+					att[PositionKey].AccessorContent = before;
+				}
 
-						att[TangentKey].AccessorContent = before;
+				if (sparseTangents != null)
+				{
+					var current = att[TangentKey].AccessorContent;
+					NumericArray before = new NumericArray();
+					before.AsFloats3 = new float3[current.AsFloats3.Length];
+					for (int j = 0; j < sparseTangents[1].AsUInts.Length; j++)
+					{
+						before.AsFloats3[sparseTangents[1].AsUInts[j]] = sparseTangents[0].AsFloats3[j];
 					}
 
-					TransformTargets(ref att);
+					att[TangentKey].AccessorContent = before;
+				}
+
+				TransformTargets(ref att);
+			}
+		}
+
+		private async Task PreparePrimitiveAttributes()
+		{
+			List<Task> tasks = new List<Task>();
+			
+			for (int meshIndex = 0; meshIndex < _gltfRoot.Meshes.Count; meshIndex++)
+			{
+				if (_assetCache.MeshCache[meshIndex] == null)
+					_assetCache.MeshCache[meshIndex] = new MeshCacheData();
+
+				var gltfMesh = _gltfRoot.Meshes[meshIndex];
+				for (int i = 0; i < gltfMesh.Primitives.Count; i++)
+				{
+					await ConstructPrimitiveAttributes(gltfMesh.Primitives[i], meshIndex, i);
+					if (gltfMesh.Primitives[i].Targets != null)
+						await ConstructMeshTargetsPrepareBuffers(gltfMesh.Primitives[i], meshIndex, i);
 				}
 				
-				if (IsMultithreaded)
-					tasks.Add(Task.Run(() => ConstructForPrimitive()));
-				else 
-					ConstructForPrimitive();
-
+#if HAVE_DRACO
+				if (Context.TryGetPlugin<DracoImportContext>(out _))
+				{
+					var anyHadDraco = gltfMesh.Primitives.Any(p =>
+						p.Extensions != null &&
+						p.Extensions.ContainsKey(KHR_draco_mesh_compression_Factory.EXTENSION_NAME));
+					if (anyHadDraco)
+					{
+						await PrepareDracoMesh(gltfMesh, meshIndex);
+					}
+				}
+#endif
 			}
 
+#if HAVE_DRACO
+			if (Context.TryGetPlugin<DracoImportContext>(out _))
+			{
+
+				List<(int, Task<DecodeResult>[])> dracoDecodeResults = new List<(int, Task<DecodeResult>[])>();
+				for (int meshIndex = 0; meshIndex < _gltfRoot.Meshes.Count; meshIndex++)
+				{
+					var gltfMesh = _gltfRoot.Meshes[meshIndex];
+					var anyHadDraco = gltfMesh.Primitives.Any(p =>
+						p.Extensions != null &&
+						p.Extensions.ContainsKey(KHR_draco_mesh_compression_Factory.EXTENSION_NAME));
+
+					if (anyHadDraco)
+					{
+						dracoDecodeResults.Add(ConstructDracoMesh(gltfMesh, meshIndex, CancellationToken.None));
+					}
+				}
+
+				await Task.WhenAll(dracoDecodeResults.Select(d => d.Item2).SelectMany(d => d));
+
+				for (int i = 0; i < dracoDecodeResults.Count; i++)
+				{
+					int meshIndex = dracoDecodeResults[i].Item1;
+
+					for (int j = 0; j < dracoDecodeResults[i].Item2.Length; j++)
+					{
+						var decodeResult = dracoDecodeResults[i].Item2[j].Result;
+						_assetCache.MeshCache[dracoDecodeResults[i].Item1].DracoMeshDecodeResult[j] = decodeResult;
+
+						if (!decodeResult.success)
+						{
+							Debug.LogError("Error decoding draco mesh", this);
+							_assetCache.MeshCache[meshIndex].DracoMeshData.Dispose();
+						}
+
+						Statistics.VertexCount += _assetCache.MeshCache[meshIndex].DracoMeshData[j].vertexCount;
+					}
+				}
+
+			}
+#endif
+			for (int meshIndex = 0; meshIndex < _gltfRoot.Meshes.Count; meshIndex++)
+			{
+				var gltfMesh = _gltfRoot.Meshes[meshIndex];
+				for (int i = 0; i < gltfMesh.Primitives.Count; i++)
+				{
+					var primCache = _assetCache.MeshCache[meshIndex].Primitives[i];
+					int primIndex = i;
+					int mIndex = meshIndex;
+					tasks.Add( Task.Run( () =>
+					{
+						if (!primCache.meshAttributesCreated)
+						{
+							primCache.meshAttributesCreated = true;
+							GLTFHelpers.BuildMeshAttributes(ref primCache.Attributes,ref primCache.SparseAccessors);
+						}
+						
+						if (gltfMesh.Primitives[primIndex].Targets != null)
+							ConstructMeshTargetsBuild(gltfMesh.Primitives[primIndex], mIndex, primIndex);
+					}));
+				}
+				
+			}
+			
 			await Task.WhenAll(tasks);
 		}
 
@@ -757,96 +894,103 @@ namespace UnityGLTF
 
 			if (_assetCache.MeshCache[meshIndex] == null)
 				_assetCache.MeshCache[meshIndex] = new MeshCacheData();
-			else if (_assetCache.MeshCache[meshIndex].Primitives.Count > 0)
-				return;
 
 			for (int i = 0; i < mesh.Primitives.Count; ++i)
 			{
 				MeshPrimitive primitive = mesh.Primitives[i];
 
 				await ConstructPrimitiveAttributes(primitive, meshIndex, i);
-
+				var primCache = _assetCache.MeshCache[meshIndex].Primitives[i];
+				if (!primCache.meshAttributesCreated)
+				{
+					primCache.meshAttributesCreated = true;
+					GLTFHelpers.BuildMeshAttributes(ref primCache.Attributes, ref primCache.SparseAccessors);
+				}
+				
 				if (primitive.Material != null)
 				{
 					await ConstructMaterialImageBuffers(primitive.Material.Value);
 				}
-
+	
 				if (primitive.Targets != null)
 				{
 					// read mesh primitive targets into assetcache
-					await ConstructMeshTargets(primitive, meshIndex, i);
+					await ConstructMeshTargetsPrepareBuffers(primitive, meshIndex, i);
+					await ConstructMeshTargetsBuild(primitive, meshIndex, i);
+					
 				}
 			}
 		}
-
+		
 		protected virtual async Task ConstructPrimitiveAttributes(MeshPrimitive primitive, int meshIndex, int primitiveIndex)
 		{
+			if (_assetCache.MeshCache[meshIndex].Primitives.Count-1 >= primitiveIndex)
+				return;
+			
 			var primData = new MeshCacheData.PrimitiveCacheData();
 			_assetCache.MeshCache[meshIndex].Primitives.Add(primData);
-
-			var attributeAccessors = primData.Attributes;
-			var sparseAccessors = new Dictionary<string, (AttributeAccessor sparseIndices, AttributeAccessor sparseValues)>();
+				
 			foreach (var attributePair in primitive.Attributes)
 			{
 				if (attributePair.Value.Value.BufferView == null) // When Draco Compression is used, the bufferView is null
 					continue;
 
-				var bufferId = attributePair.Value.Value.BufferView.Value.Buffer;
-				var bufferData = await GetBufferData(bufferId);
-
-				attributeAccessors[attributePair.Key] = new AttributeAccessor
+				if (!primData.Attributes.ContainsKey(attributePair.Key))
 				{
-					AccessorId = attributePair.Value,
-					bufferData = bufferData.bufferData,
-					Offset = (uint)bufferData.ChunkOffset
-				};
-
+					var bufferId = attributePair.Value.Value.BufferView.Value.Buffer;
+					var bufferData = await GetBufferData(bufferId);
+					
+					primData.Attributes[attributePair.Key] = new AttributeAccessor
+					{
+						AccessorId = attributePair.Value,
+						bufferData = bufferData.bufferData,
+						Offset = (uint)bufferData.ChunkOffset
+					};
+				}
+				
 				var sparse = attributePair.Value.Value.Sparse;
 				if (sparse != null)
 				{
-					var sparseBufferId = sparse.Values.BufferView.Value.Buffer;
-					var sparseBufferData = await GetBufferData(sparseBufferId);
-					AttributeAccessor sparseValues = new AttributeAccessor
+					if (!primData.Attributes.ContainsKey(attributePair.Key))
 					{
-						AccessorId = attributePair.Value,
-						bufferData = sparseBufferData.bufferData,
-						Offset = (uint)sparseBufferData.ChunkOffset
-					};
+						var sparseBufferId = sparse.Values.BufferView.Value.Buffer;
+						var sparseBufferData = await GetBufferData(sparseBufferId);
+						AttributeAccessor sparseValues = new AttributeAccessor
+						{
+							AccessorId = attributePair.Value,
+							bufferData = sparseBufferData.bufferData,
+							Offset = (uint)sparseBufferData.ChunkOffset
+						};
 
-					var sparseIndicesBufferId = sparse.Indices.BufferView.Value.Buffer;
-					var sparseIndicesBufferData = await GetBufferData(sparseIndicesBufferId);
-					AttributeAccessor sparseIndices = new AttributeAccessor
-					{
-						AccessorId = attributePair.Value,
-						bufferData = sparseIndicesBufferData.bufferData,
-						Offset = (uint)sparseIndicesBufferData.ChunkOffset
-					};
+						var sparseIndicesBufferId = sparse.Indices.BufferView.Value.Buffer;
+						var sparseIndicesBufferData = await GetBufferData(sparseIndicesBufferId);
+						AttributeAccessor sparseIndices = new AttributeAccessor
+						{
+							AccessorId = attributePair.Value,
+							bufferData = sparseIndicesBufferData.bufferData,
+							Offset = (uint)sparseIndicesBufferData.ChunkOffset
+						};
 
-					sparseAccessors[attributePair.Key] = (sparseIndices, sparseValues);
+						primData.SparseAccessors[attributePair.Key] = (sparseIndices, sparseValues);
+					}
 				}
 			}
 
 			if (primitive.Indices != null && primitive.Indices.Value.BufferView != null)
 			{
-				var bufferId = primitive.Indices.Value.BufferView.Value.Buffer;
-				var bufferData = await GetBufferData(bufferId);
-
-				attributeAccessors[SemanticProperties.INDICES] = new AttributeAccessor
+				if (!primData.Attributes.ContainsKey(SemanticProperties.INDICES))
 				{
-					AccessorId = primitive.Indices,
-					bufferData = bufferData.bufferData,
-					Offset = (uint)bufferData.ChunkOffset
-				};
+					var bufferId = primitive.Indices.Value.BufferView.Value.Buffer;
+					var bufferData = await GetBufferData(bufferId);
+
+					primData.Attributes[SemanticProperties.INDICES] = new AttributeAccessor
+					{
+						AccessorId = primitive.Indices,
+						bufferData = bufferData.bufferData,
+						Offset = (uint)bufferData.ChunkOffset
+					};
+				}
 			}
-			try
-			{
-				await GLTFHelpers.BuildMeshAttributes(attributeAccessors, sparseAccessors);
-			}
-			catch (GLTFLoadException e)
-			{
-				Debug.Log(LogType.Warning, e.ToString());
-			}
-			TransformAttributes(ref attributeAccessors);
 		}
 
 		protected void ConvertAttributeAccessorsToUnityTypes(
@@ -975,30 +1119,6 @@ namespace UnityGLTF
 			{
 				AttributeAccessor attributeAccessor = attributeAccessors[SemanticProperties.TANGENT];
 				SchemaExtensions.ConvertVector3CoordinateSpace(ref attributeAccessor, SchemaExtensions.CoordinateSpaceConversionScale);
-			}
-		}
-
-		protected void TransformAttributes(ref Dictionary<string, AttributeAccessor> attributeAccessors)
-		{
-			foreach (var name in attributeAccessors.Keys)
-			{
-				var aa = attributeAccessors[name];
-				switch (name)
-				{
-					case SemanticProperties.POSITION:
-					case SemanticProperties.NORMAL:
-						SchemaExtensions.ConvertVector3CoordinateSpace(ref aa, SchemaExtensions.CoordinateSpaceConversionScale);
-						break;
-					case SemanticProperties.TANGENT:
-						SchemaExtensions.ConvertVector4CoordinateSpace(ref aa, SchemaExtensions.TangentSpaceConversionScale);
-						break;
-					case SemanticProperties.TEXCOORD_0:
-					case SemanticProperties.TEXCOORD_1:
-					case SemanticProperties.TEXCOORD_2:
-					case SemanticProperties.TEXCOORD_3:
-						SchemaExtensions.FlipTexCoordArrayV(ref aa);
-						break;
-				}
 			}
 		}
 

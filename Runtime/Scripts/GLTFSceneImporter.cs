@@ -653,6 +653,9 @@ namespace UnityGLTF
 
 			GetGltfContentTotals(scene);
 
+			if (IsMultithreaded)
+				await PreparePrimitiveAttributes();
+			
 			await ConstructScene(scene, showSceneObj, cancellationToken);
 
 			if (SceneParent != null)
@@ -941,6 +944,9 @@ namespace UnityGLTF
 
 		protected async Task ConstructBuffer(GLTFBuffer buffer, int bufferIndex)
 		{
+			if (_assetCache.BufferCache[bufferIndex] != null)
+				return;
+			
 #if HAVE_MESHOPT_DECOMPRESS
 			if (buffer.Extensions != null && buffer.Extensions.ContainsKey(EXT_meshopt_compression_Factory.EXTENSION_NAME))
 			{

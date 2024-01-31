@@ -246,8 +246,6 @@ namespace GLTF
 			resultArray = before;
 		}
 		
-		public static float timer_LoadBufferView = 0;
-		
 		/// <summary>
 		/// Uses the accessor to parse the buffer into attributes needed to construct the mesh primitive
 		/// </summary>
@@ -256,65 +254,51 @@ namespace GLTF
 		/// Uses the accessor to parse the buffer into attributes needed to construct the mesh primitive
 		/// </summary>
 		/// <param name="attributes">A dictionary that contains a mapping of attribute name to data needed to parse</param>
-		public static async Task BuildMeshAttributes(Dictionary<string, AttributeAccessor> attributes, Dictionary<string, (AttributeAccessor sparseIndices, AttributeAccessor sparseValues)> sparseAccessors)
+		public static void BuildMeshAttributes(ref Dictionary<string, AttributeAccessor> attributes,ref Dictionary<string, (AttributeAccessor sparseIndices, AttributeAccessor sparseValues)> sparseAccessors)
 		{
-			List<Task> tasks = new List<Task>();
-			
 			if (attributes.TryGetValue(SemanticProperties.POSITION, out var attributeAccessor))
 			{
-				tasks.Add(Task.Run(() =>
-				{
-					NumericArray resultArray = attributeAccessor.AccessorContent;
-					LoadBufferView(attributeAccessor, out NativeArray<byte> bufferViewCache);
-					attributeAccessor.AccessorId.Value.AsVertexArray(ref resultArray, bufferViewCache);
+				NumericArray resultArray = attributeAccessor.AccessorContent;
+				LoadBufferView(attributeAccessor, out NativeArray<byte> bufferViewCache);
+				attributeAccessor.AccessorId.Value.AsVertexArray(ref resultArray, bufferViewCache);
 
-					if (sparseAccessors.TryGetValue(SemanticProperties.POSITION, out var sparseData))
-						ApplySparseAccessorsVec3(ref resultArray, attributeAccessor, sparseData.sparseValues,
-							sparseData.sparseIndices);
+				if (sparseAccessors.TryGetValue(SemanticProperties.POSITION, out var sparseData))
+					ApplySparseAccessorsVec3(ref resultArray, attributeAccessor, sparseData.sparseValues,
+						sparseData.sparseIndices);
 
-					attributeAccessor.AccessorContent = resultArray;
-				}));
+				attributeAccessor.AccessorContent = resultArray;
 			}
 			if (attributes.TryGetValue(SemanticProperties.INDICES, out var attributeAccessorIndices))
 			{
-				tasks.Add(Task.Run(() =>
-				{
-					NumericArray resultArray = attributeAccessorIndices.AccessorContent;
-					LoadBufferView(attributeAccessorIndices, out NativeArray<byte> bufferViewCache);
-					attributeAccessorIndices.AccessorId.Value.AsTriangles(ref resultArray, bufferViewCache);
-					attributeAccessorIndices.AccessorContent = resultArray;
-				}));
+				NumericArray resultArray = attributeAccessorIndices.AccessorContent;
+				LoadBufferView(attributeAccessorIndices, out NativeArray<byte> bufferViewCache);
+				attributeAccessorIndices.AccessorId.Value.AsTriangles(ref resultArray, bufferViewCache);
+				attributeAccessorIndices.AccessorContent = resultArray;
 			}
 			if (attributes.TryGetValue(SemanticProperties.NORMAL, out var attributeAccessorNormals))
 			{
-				tasks.Add(Task.Run(() =>
-				{
-					NumericArray resultArray = attributeAccessorNormals.AccessorContent;
-					LoadBufferView(attributeAccessorNormals, out NativeArray<byte> bufferViewCache);
-					attributeAccessorNormals.AccessorId.Value.AsNormalArray(ref resultArray, bufferViewCache);
+				NumericArray resultArray = attributeAccessorNormals.AccessorContent;
+				LoadBufferView(attributeAccessorNormals, out NativeArray<byte> bufferViewCache);
+				attributeAccessorNormals.AccessorId.Value.AsNormalArray(ref resultArray, bufferViewCache);
 
-					if (sparseAccessors.TryGetValue(SemanticProperties.NORMAL, out var sparseData))
-						ApplySparseAccessorsVec3(ref resultArray, attributeAccessorNormals, sparseData.sparseValues, sparseData.sparseIndices);
+				if (sparseAccessors.TryGetValue(SemanticProperties.NORMAL, out var sparseData))
+					ApplySparseAccessorsVec3(ref resultArray, attributeAccessorNormals, sparseData.sparseValues, sparseData.sparseIndices);
 
-					attributeAccessorNormals.AccessorContent = resultArray;
-				}));
+				attributeAccessorNormals.AccessorContent = resultArray;
 			}
 
 			for (int i = 0; i < SemanticProperties.TexCoord.Length; i++)
 			{
 				if (attributes.TryGetValue(SemanticProperties.TexCoord[i], out var attributeAccessorTexCoord))
 				{
-					tasks.Add(Task.Run(() =>
-					{
-						NumericArray resultArray = attributeAccessorTexCoord.AccessorContent;
-						LoadBufferView(attributeAccessorTexCoord, out NativeArray<byte> bufferViewCache);
-						attributeAccessorTexCoord.AccessorId.Value.AsTexcoordArray(ref resultArray, bufferViewCache);
+					NumericArray resultArray = attributeAccessorTexCoord.AccessorContent;
+					LoadBufferView(attributeAccessorTexCoord, out NativeArray<byte> bufferViewCache);
+					attributeAccessorTexCoord.AccessorId.Value.AsTexcoordArray(ref resultArray, bufferViewCache);
 
-						// if (sparseAccessors.TryGetValue(SemanticProperties.TexCoord[0], out var sparseData))
-						// 	ApplySparseAccessorsTexCoord(ref resultArray, attributeAccessor, sparseData.sparseValues, sparseData.sparseIndices);
+					// if (sparseAccessors.TryGetValue(SemanticProperties.TexCoord[0], out var sparseData))
+					// 	ApplySparseAccessorsTexCoord(ref resultArray, attributeAccessor, sparseData.sparseValues, sparseData.sparseIndices);
 
-						attributeAccessorTexCoord.AccessorContent = resultArray;
-					}));
+					attributeAccessorTexCoord.AccessorContent = resultArray;
 				}
 			}
 
@@ -322,46 +306,37 @@ namespace GLTF
 			{
 				if (attributes.TryGetValue(SemanticProperties.Color[i], out var attributeAccessorColor))
 				{
-					tasks.Add(Task.Run(() =>
-					{
-						NumericArray resultArray = attributeAccessorColor.AccessorContent;
-						LoadBufferView(attributeAccessorColor, out NativeArray<byte> bufferViewCache);
-						attributeAccessorColor.AccessorId.Value.AsColorArray(ref resultArray, bufferViewCache);
+					NumericArray resultArray = attributeAccessorColor.AccessorContent;
+					LoadBufferView(attributeAccessorColor, out NativeArray<byte> bufferViewCache);
+					attributeAccessorColor.AccessorId.Value.AsColorArray(ref resultArray, bufferViewCache);
 
-						// if (sparseAccessors.TryGetValue(SemanticProperties.Color[0], out var sparseData))
-						// 	ApplySparseAccessorsColor(ref resultArray, attributeAccessor, sparseData.sparseValues, sparseData.sparseIndices);
+					// if (sparseAccessors.TryGetValue(SemanticProperties.Color[0], out var sparseData))
+					// 	ApplySparseAccessorsColor(ref resultArray, attributeAccessor, sparseData.sparseValues, sparseData.sparseIndices);
 
-						attributeAccessorColor.AccessorContent = resultArray;
-					}));
+					attributeAccessorColor.AccessorContent = resultArray;
 				}
 			}
 			
 			if (attributes.TryGetValue(SemanticProperties.TANGENT, out var attributeAccessorTangent))
 			{
-				tasks.Add(Task.Run(() =>
-				{
-					NumericArray resultArray = attributeAccessorTangent.AccessorContent;
-					LoadBufferView(attributeAccessorTangent, out NativeArray<byte> bufferViewCache);
-					attributeAccessorTangent.AccessorId.Value.AsTangentArray(ref resultArray, bufferViewCache);
+				NumericArray resultArray = attributeAccessorTangent.AccessorContent;
+				LoadBufferView(attributeAccessorTangent, out NativeArray<byte> bufferViewCache);
+				attributeAccessorTangent.AccessorId.Value.AsTangentArray(ref resultArray, bufferViewCache);
 
-					// if (sparseAccessors.TryGetValue(SemanticProperties.TANGENT, out var sparseData))
-					// 	ApplySparseAccessorsTangent(ref resultArray, attributeAccessor, sparseData.sparseValues, sparseData.sparseIndices);
+				// if (sparseAccessors.TryGetValue(SemanticProperties.TANGENT, out var sparseData))
+				// 	ApplySparseAccessorsTangent(ref resultArray, attributeAccessor, sparseData.sparseValues, sparseData.sparseIndices);
 
-					attributeAccessorTangent.AccessorContent = resultArray;
-				}));
+				attributeAccessorTangent.AccessorContent = resultArray;
 			}
 
 			for (int i = 0; i < SemanticProperties.Weight.Length; i++)
 			{
 				if (attributes.TryGetValue(SemanticProperties.Weight[i], out var attributeAccessorWeight))
 				{
-					tasks.Add(Task.Run(() =>
-					{
-						NumericArray resultArray = attributeAccessorWeight.AccessorContent;
-						LoadBufferView(attributeAccessorWeight, out NativeArray<byte> bufferViewCache);
-						attributeAccessorWeight.AccessorId.Value.AsFloat4Array(ref resultArray, bufferViewCache);
-						attributeAccessorWeight.AccessorContent = resultArray;
-					}));
+					NumericArray resultArray = attributeAccessorWeight.AccessorContent;
+					LoadBufferView(attributeAccessorWeight, out NativeArray<byte> bufferViewCache);
+					attributeAccessorWeight.AccessorId.Value.AsFloat4Array(ref resultArray, bufferViewCache);
+					attributeAccessorWeight.AccessorContent = resultArray;
 				}
 			}
 
@@ -369,18 +344,13 @@ namespace GLTF
 			{
 				if (attributes.TryGetValue(SemanticProperties.Joint[0], out var attributeAccessorJoint))
 				{
-					tasks.Add(Task.Run(() =>
-					{
-						NumericArray resultArray = attributeAccessorJoint.AccessorContent;
-						LoadBufferView(attributeAccessorJoint, out NativeArray<byte> bufferViewCache);
-						attributeAccessorJoint.AccessorId.Value.AsFloat4Array(ref resultArray, bufferViewCache, 0,
-							false);
-						attributeAccessorJoint.AccessorContent = resultArray;
-					}));
+					NumericArray resultArray = attributeAccessorJoint.AccessorContent;
+					LoadBufferView(attributeAccessorJoint, out NativeArray<byte> bufferViewCache);
+					attributeAccessorJoint.AccessorId.Value.AsFloat4Array(ref resultArray, bufferViewCache, 0,
+						false);
+					attributeAccessorJoint.AccessorContent = resultArray;
 				}
 			}
-
-			await Task.WhenAll(tasks);
 		}
 
 		public static void BuildTargetAttributes(ref Dictionary<string, AttributeAccessor> attributes)
