@@ -250,6 +250,27 @@ namespace UnityGLTF.Extensions
 			Vector3 unityVec3 = Vector3.Scale(gltfVec3.ToUnityVector3Raw(), coordinateSpaceConversionScale);
 			return unityVec3;
 		}		
+
+		public static float3 ToUnityFloat3Convert(this float3 gltfVec3)
+		{
+			float3 coordinateSpaceConversionScale = new float3(CoordinateSpaceConversionScale.X, CoordinateSpaceConversionScale.Y, CoordinateSpaceConversionScale.Z);
+			float3 unityVec3 = gltfVec3 * coordinateSpaceConversionScale;
+			return unityVec3;
+		}		
+		
+				
+		public static void ToUnityVector3Convert(this float3[] vec3, Vector3[] arr, int offset)
+		{
+			float3 conversion = new float3(CoordinateSpaceConversionScale.X,
+				CoordinateSpaceConversionScale.Y,
+				CoordinateSpaceConversionScale.Z);
+			
+			for (int i = 0; i < vec3.Length; i++)
+			{
+				arr[i+offset] = vec3[i] * conversion;
+			}
+		}			
+
 		
 		/// <summary>
 		/// Convert unity Vector3 to gltf Vector3
@@ -381,7 +402,7 @@ namespace UnityGLTF.Extensions
 			{
 				arr[i+offset] = vec3[i].ToUnityVector3Raw();
 			}
-		}			
+		}		
 		
 		public static Vector4 ToUnityVector4Raw(this GLTF.Math.Vector4 vec4)
 		{
