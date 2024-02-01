@@ -138,6 +138,7 @@ namespace UnityGLTF
 		// With using KTX, we need to return a new Texture2D instance at the moment. Unity KTX package does not support loading into existing one
 		async Task<Texture2D> CheckMimeTypeAndLoadImage(GLTFImage image, Texture2D texture, NativeArray<byte> data, bool markGpuOnly)
 		{
+			pm_CheckMimeTypeAndLoadImage.Begin();
 			switch (image.MimeType)
 			{
 				case "image/png":
@@ -155,14 +156,24 @@ namespace UnityGLTF
 					if (Context.TryGetPlugin<Ktx2ImportContext>(out _))
 					{
 						bool isLinear = !texture.isDataSRGB;
+						if (texture != null)
+						{
 #if UNITY_EDITOR
-						Texture.DestroyImmediate(texture);
+							Texture.DestroyImmediate(texture);
 #else
-						Texture.Destroy(texture);
+							Texture.Destroy(texture);
 #endif
+						}
+						pm_KtxTextureLoad.Begin();
 						var ktxTexture = new KtxUnity.KtxTexture();
 						
-						var resultTextureData = await ktxTexture.LoadFromBytes(data, isLinear);
+						var errorCode = ktxTexture.Open(data);
+						//if (errorCode != KtxUnity.ErrorCode.Success) {
+							//return new TextureResult(errorCode);
+						//}
+
+						var resultTextureData = await ktxTexture.LoadTexture2D(isLinear);
+						pm_KtxTextureLoad.End();
 						texture = resultTextureData.texture;
 						texture.name = textureName;
 
@@ -192,11 +203,13 @@ namespace UnityGLTF
 			}
 
 			await Task.CompletedTask;
+			pm_CheckMimeTypeAndLoadImage.End();
 			return texture;
 		}
 
 		protected virtual async Task ConstructUnityTexture(Stream stream, bool markGpuOnly, bool isLinear, bool isNormal, GLTFImage image, int imageCacheIndex)
 		{
+			pm_ConstructUnityTexture.Begin();
 			bool convertToDxt5nmFormat = false;
 #if UNITY_EDITOR
 			if (stream is AssetDatabaseStream assetDatabaseStream)
@@ -205,6 +218,7 @@ namespace UnityGLTF
 				progressStatus.TextureLoaded++;
 				progress?.Report(progressStatus);
 				_assetCache.ImageCache[imageCacheIndex] = tx;
+				pm_ConstructUnityTexture.End();
 				return;
 			}
 
@@ -321,6 +335,7 @@ namespace UnityGLTF
 				progress?.Report(progressStatus);
 			}
 			_assetCache.ImageCache[imageCacheIndex] = texture;
+			pm_ConstructUnityTexture.End();
 		}
 
 
@@ -419,6 +434,7 @@ namespace UnityGLTF
 
 		protected virtual async Task ConstructTexture(GLTFTexture texture, int textureIndex, bool markGpuOnly, bool isLinear, bool isNormal)
 		{
+			pm_ConstructTexture.Begin();
 			if (_assetCache.TextureCache[textureIndex].Texture == null)
 			{
 				int sourceId = GetTextureSourceId(texture);
@@ -426,8 +442,12 @@ namespace UnityGLTF
 				await ConstructImage(image, sourceId, markGpuOnly, isLinear, isNormal);
 
 				var source = _assetCache.ImageCache[sourceId];
-				if (!source) return;
-
+				if (!source)
+				{
+					pm_ConstructTexture.End();
+					return;
+				}
+				
 				FilterMode desiredFilterMode;
 				TextureWrapMode desiredWrapModeS, desiredWrapModeT;
 

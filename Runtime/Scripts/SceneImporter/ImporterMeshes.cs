@@ -54,6 +54,7 @@ namespace UnityGLTF
 			{
 				return;
 			}
+			pm_ConstructMesh.Begin();
 
 			var anyHadDraco = mesh.Primitives.Any(p => p.Extensions != null && p.Extensions.ContainsKey(KHR_draco_mesh_compression_Factory.EXTENSION_NAME));
 #if HAVE_DRACO
@@ -69,6 +70,7 @@ namespace UnityGLTF
 						_assetCache.MeshCache[meshIndex].DracoMeshDecodeResult[i] = dracoTask.Item2[i].Result;
 					}
 					await BuildUnityDracoMesh(mesh, meshIndex);
+					pm_ConstructMesh.End();
 					return;
 				}
 				else
@@ -140,6 +142,7 @@ namespace UnityGLTF
 
 			Statistics.VertexCount += unityData.Vertices.Length;
 			await ConstructUnityMesh(unityData, meshIndex, mesh.Name);
+			pm_ConstructMesh.End();
 		}
 
 #if HAVE_DRACO
@@ -331,6 +334,14 @@ namespace UnityGLTF
 
 		protected void ApplyImportOptionsOnMesh(Mesh mesh)
 		{
+			pm_ApplyImportOptionsOnMesh.Begin();
+			if (_options.ImportTangents == GLTFImporterNormals.None)
+				mesh.tangents = new Vector4[0];
+			else if (_options.ImportTangents == GLTFImporterNormals.Calculate && mesh.GetTopology(0) == MeshTopology.Triangles)
+				mesh.RecalculateTangents();
+			else if (_options.ImportTangents == GLTFImporterNormals.Import && mesh.tangents.Length == 0 && mesh.GetTopology(0) == MeshTopology.Triangles)
+				mesh.RecalculateTangents();
+			
 			if (_options.ImportNormals == GLTFImporterNormals.None)
 				mesh.normals = new Vector3[0];
 			else if (_options.ImportNormals == GLTFImporterNormals.Calculate && mesh.GetTopology(0) == MeshTopology.Triangles)
@@ -340,12 +351,6 @@ namespace UnityGLTF
 			else if (_options.ImportTangents != GLTFImporterNormals.None && mesh.normals.Length == 0)
 				mesh.RecalculateNormals();
 
-			if (_options.ImportTangents == GLTFImporterNormals.None)
-				mesh.tangents = new Vector4[0];
-			else if (_options.ImportTangents == GLTFImporterNormals.Calculate && mesh.GetTopology(0) == MeshTopology.Triangles)
-				mesh.RecalculateTangents();
-			else if (_options.ImportTangents == GLTFImporterNormals.Import && mesh.tangents.Length == 0 && mesh.GetTopology(0) == MeshTopology.Triangles)
-				mesh.RecalculateTangents();
 
 			if (_options.SwapUVs)
 			{
@@ -355,7 +360,7 @@ namespace UnityGLTF
 				if(uv.Length > 0)
 					mesh.uv2 = uv;
 			}
-			
+			pm_ApplyImportOptionsOnMesh.End();
 		}
 
 #if HAVE_DRACO
@@ -365,6 +370,7 @@ namespace UnityGLTF
 		/// <returns></returns>
 		protected async Task ConstructUnityMesh(GLTFMesh gltfMesh, DecodeResult[] decodeResults, Mesh.MeshDataArray meshes, int meshIndex, string meshName)
 		{
+			pm_ConstructUnityMesh_Draco.Begin();
 			uint verticesLength = 0;
 			for (int i = 0; i < meshes.Length; i++)
 				verticesLength+= (uint)meshes[i].vertexCount;
@@ -475,12 +481,14 @@ namespace UnityGLTF
 			}
 
 			_assetCache.MeshCache[meshIndex].LoadedMesh = mesh;
+			pm_ConstructUnityMesh_Draco.End();
 		}
 
 #endif
 
 		private static UnityMeshData CreateUnityMeshData(GLTFMesh gltfMesh, MeshPrimitive firstPrim, uint verticesLength, bool onlyMorphTargets = false)
 		{
+			pm_CreateUnityMeshData.Begin();
 			UnityMeshData unityMeshData = new UnityMeshData()
 			{
 				MorphTargetVertices = firstPrim.Targets != null && firstPrim.Targets[0].ContainsKey(SemanticProperties.POSITION)
@@ -525,7 +533,7 @@ namespace UnityGLTF
 					? new BoneWeight[verticesLength]
 					: null;
 			}
-
+			pm_CreateUnityMeshData.End();
 			return unityMeshData;
 		}
 
@@ -538,6 +546,7 @@ namespace UnityGLTF
 		/// <returns></returns>
 		protected async Task ConstructUnityMesh(UnityMeshData unityMeshData, int meshIndex, string meshName)
 		{
+			pm_ConstructUnityMesh.Begin();
 			await YieldOnTimeoutAndThrowOnLowMemory();
 			Mesh mesh = new Mesh
 			{
@@ -586,12 +595,14 @@ namespace UnityGLTF
 			}
 
 			_assetCache.MeshCache[meshIndex].LoadedMesh = mesh;
+			pm_ConstructUnityMesh.End();
 		}
 
 		private void AddBlendShapesToMesh(UnityMeshData unityMeshData, int meshIndex, Mesh mesh)
 		{
 			if (unityMeshData.MorphTargetVertices != null)
 			{
+				pm_AddBlendShapesToMesh.Begin();
 				var gltfMesh = _gltfRoot.Meshes[meshIndex];
 				var firstPrim = gltfMesh.Primitives[0];
 				// TODO theoretically there could be multiple prims and only one of them has morph targets
@@ -604,11 +615,13 @@ namespace UnityGLTF
 						unityMeshData.MorphTargetTangents != null ? unityMeshData.MorphTargetTangents[i] : null
 					);
 				}
+				pm_AddBlendShapesToMesh.End();
 			}
 		}
 
 		protected virtual async Task ConstructMeshTargetsPrepareBuffers(MeshPrimitive primitive, int meshIndex, int primitiveIndex)
 		{
+			pm_ConstructMeshTargetsPrepareBuffers.Begin();
 			var newTargets = new List<Dictionary<string, AttributeAccessor>>(primitive.Targets.Count);
 			_assetCache.MeshCache[meshIndex].Primitives[primitiveIndex].Targets = newTargets;
 
@@ -662,6 +675,7 @@ namespace UnityGLTF
 					await GetBufferData(bufferId);
 				}
 			}
+			pm_ConstructMeshTargetsPrepareBuffers.End();
 		}
 
 		protected virtual async Task ConstructMeshTargetsBuild(MeshPrimitive primitive, int meshIndex, int primitiveIndex)
@@ -792,6 +806,7 @@ namespace UnityGLTF
 
 		private async Task PreparePrimitiveAttributes()
 		{
+			
 			List<Task> tasks = new List<Task>();
 			
 			for (int meshIndex = 0; meshIndex < _gltfRoot.Meshes.Count; meshIndex++)
@@ -824,7 +839,7 @@ namespace UnityGLTF
 #if HAVE_DRACO
 			if (Context.TryGetPlugin<DracoImportContext>(out _))
 			{
-
+				pm_DracoDecoding_MT.Begin();
 				List<(int, Task<DecodeResult>[])> dracoDecodeResults = new List<(int, Task<DecodeResult>[])>();
 				for (int meshIndex = 0; meshIndex < _gltfRoot.Meshes.Count; meshIndex++)
 				{
@@ -859,6 +874,7 @@ namespace UnityGLTF
 						Statistics.VertexCount += _assetCache.MeshCache[meshIndex].DracoMeshData[j].vertexCount;
 					}
 				}
+				pm_DracoDecoding_MT.End();
 
 			}
 #endif
@@ -890,6 +906,7 @@ namespace UnityGLTF
 
 		private async Task ConstructMeshAttributes(GLTFMesh mesh, MeshId meshId)
 		{
+			pm_ConstructMeshAttributes.Begin();
 			int meshIndex = meshId.Id;
 
 			if (_assetCache.MeshCache[meshIndex] == null)
@@ -904,12 +921,17 @@ namespace UnityGLTF
 				if (!primCache.meshAttributesCreated)
 				{
 					primCache.meshAttributesCreated = true;
+					pm_BuildMeshAttributes.Begin();
 					GLTFHelpers.BuildMeshAttributes(ref primCache.Attributes, ref primCache.SparseAccessors);
+					pm_BuildMeshAttributes.End();
 				}
 				
 				if (primitive.Material != null)
 				{
+					pm_ConstructMaterialImageBuffers.Begin();
 					await ConstructMaterialImageBuffers(primitive.Material.Value);
+					pm_ConstructMaterialImageBuffers.End();
+
 				}
 	
 				if (primitive.Targets != null)
@@ -920,6 +942,7 @@ namespace UnityGLTF
 					
 				}
 			}
+			pm_ConstructMeshAttributes.End();
 		}
 		
 		protected virtual async Task ConstructPrimitiveAttributes(MeshPrimitive primitive, int meshIndex, int primitiveIndex)
@@ -927,6 +950,7 @@ namespace UnityGLTF
 			if (_assetCache.MeshCache[meshIndex].Primitives.Count-1 >= primitiveIndex)
 				return;
 			
+			pm_ConstructPrimitiveAttributes.Begin();
 			var primData = new MeshCacheData.PrimitiveCacheData();
 			_assetCache.MeshCache[meshIndex].Primitives.Add(primData);
 				
@@ -991,6 +1015,7 @@ namespace UnityGLTF
 					};
 				}
 			}
+			pm_ConstructPrimitiveAttributes.End();
 		}
 
 		protected void ConvertAttributeAccessorsToUnityTypes(
@@ -999,6 +1024,7 @@ namespace UnityGLTF
 			uint vertOffset,
 			int indexOffset)
 		{
+			pm_ConvertAttributesToUnityTypes.Begin();
 			var meshAttributes = primData.Attributes;
 			uint vertexCount = 0;
 			if (meshAttributes.TryGetValue(SemanticProperties.POSITION, out var attribute))
@@ -1098,6 +1124,7 @@ namespace UnityGLTF
 					}
 				}
 			}
+			pm_ConvertAttributesToUnityTypes.End();
 		}
 
 		// Flip vectors to Unity coordinate system

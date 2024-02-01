@@ -3,18 +3,22 @@ using GLTF.Schema;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Runtime.ExceptionServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Unity.Collections;
+using Unity.Profiling;
 using UnityEngine;
 using UnityGLTF.Cache;
 using UnityGLTF.Extensions;
 using UnityGLTF.Loader;
 using UnityGLTF.Plugins;
+using Debug = System.Diagnostics.Debug;
 using Quaternion = UnityEngine.Quaternion;
 using Vector2 = UnityEngine.Vector2;
 using Vector3 = UnityEngine.Vector3;
@@ -135,8 +139,102 @@ namespace UnityGLTF
 	/// </summary>
 	public delegate float[] ValuesConvertion(NumericArray data, int frame);
 
+	public class MeasurementGroup
+	{
+		private List<MeasurementMarker> _markers = new List<MeasurementMarker>();
+		
+		public MeasurementGroup(string name)
+		{
+			
+		}
+		
+		public void Register(MeasurementMarker marker)
+		{
+			_markers.Add(marker);
+		}
+
+		public void Reset()
+		{
+			foreach (var m in _markers)
+				m.Reset();
+		}
+
+		public void OutputTimes()
+		{
+			var sb = new StringBuilder();
+			sb.AppendLine(" -- Performance Measurements --");
+			foreach (var m in _markers)
+				sb.AppendLine(m.Output());
+			UnityEngine.Debug.Log( sb.ToString());
+		}
+	}
+	
+	public class MeasurementMarker
+	{
+		public string Name;
+
+		private Stopwatch sw = new Stopwatch();
+		private float timer = 0;
+		
+		public MeasurementMarker(MeasurementGroup category, string name)
+		{
+			Name = name;
+			category.Register(this);
+		}
+
+		public string Output()
+		{
+			return $"{Name} took {timer.ToString()}ms";
+		}
+
+		public void Reset()
+		{
+			timer = 0;
+		}
+		
+		public void Begin()
+		{
+			timer+=sw.ElapsedMilliseconds;
+			sw.Reset();
+			sw.Start();
+		}
+
+		public void End()
+		{
+			sw.Stop();
+			timer+=sw.ElapsedMilliseconds;
+			sw.Reset();
+		}
+	}
 	public partial class GLTFSceneImporter : IDisposable
 	{
+		private static MeasurementGroup performanceMeasurements = new MeasurementGroup("GLTFSceneImporter");
+		private static MeasurementMarker pm_PreparePrimitiveAttributes = new MeasurementMarker( performanceMeasurements, "GLTF.PreparePrimitiveAttributes");
+		private static MeasurementMarker pm_ConstructMeshTargetsPrepareBuffers = new MeasurementMarker( performanceMeasurements, "GLTF.ConstructMeshTargetsPrepareBuffers");
+		private static MeasurementMarker pm_ConstructMeshAttributes = new MeasurementMarker( performanceMeasurements, "GLTF.ConstructMeshAttributes");
+		private static MeasurementMarker pm_ConstructPrimitiveAttributes = new MeasurementMarker( performanceMeasurements, "GLTF.ConstructMeshAttributes");
+		private static MeasurementMarker pm_ConvertAttributesToUnityTypes = new MeasurementMarker( performanceMeasurements, "GLTF.ConvertAttributeAccessorsToUnityTypes");
+		private static MeasurementMarker pm_BuildMeshAttributes = new MeasurementMarker( performanceMeasurements, "GLTF.BuildMeshAttributes");
+		private static MeasurementMarker pm_DracoDecoding_MT = new MeasurementMarker( performanceMeasurements, "GLTF.pm_DracoDecoding");
+		private static MeasurementMarker pm_ConstructMaterialImageBuffers = new MeasurementMarker( performanceMeasurements, "GLTF.ConstructMaterialImageBuffers");
+		private static MeasurementMarker pm_ConstructMesh = new MeasurementMarker( performanceMeasurements, "GLTF.ConstructMesh");
+		private static MeasurementMarker pm_ConstructMeshFromNode = new MeasurementMarker( performanceMeasurements, "GLTF.ConstructMeshFromNode");
+		private static MeasurementMarker pm_CreateUnityMeshData = new MeasurementMarker( performanceMeasurements, "GLTF.CreateUnityMeshData");
+		private static MeasurementMarker pm_ConstructUnityMesh = new MeasurementMarker( performanceMeasurements, "GLTF.ConstructUnityMesh");
+		private static MeasurementMarker pm_ConstructUnityMesh_Draco = new MeasurementMarker( performanceMeasurements, "GLTF.ConstructUnityMesh_Draco");
+		private static MeasurementMarker pm_AddBlendShapesToMesh = new MeasurementMarker( performanceMeasurements, "GLTF.AddBlendShapesToMesh");
+		private static MeasurementMarker pm_ConstructMaterial = new MeasurementMarker( performanceMeasurements, "GLTF.ConstructMaterial");
+		private static MeasurementMarker pm_ApplyImportOptionsOnMesh = new MeasurementMarker( performanceMeasurements, "GLTF.ApplyImportOptionsOnMesh");
+		private static MeasurementMarker pm_ConstructTexture = new MeasurementMarker( performanceMeasurements, "GLTF.ConstructTexture");
+		private static MeasurementMarker pm_ConstructUnityTexture = new MeasurementMarker( performanceMeasurements, "GLTF.ConstructUnityTexture"); 
+		private static MeasurementMarker pm_CheckMimeTypeAndLoadImage = new MeasurementMarker( performanceMeasurements, "GLTF.CheckMimeTypeAndLoadImage");
+		private static MeasurementMarker pm_KtxTextureLoad = new MeasurementMarker( performanceMeasurements, "GLTF.KtxTextureLoad");
+		private static MeasurementMarker pm_GetNodePur = new MeasurementMarker( performanceMeasurements, "GLTF.GetNodePur");
+		private static MeasurementMarker pm_ConstructNodePur = new MeasurementMarker( performanceMeasurements, "GLTF.ConstructNodePur");
+		private static MeasurementMarker pm_ConstructBuffer = new MeasurementMarker( performanceMeasurements, "GLTF.ConstructBuffer");
+		private static MeasurementMarker pm_ConstructAllNodes = new MeasurementMarker( performanceMeasurements, "GLTF.ConstructAllNodes");
+		private static MeasurementMarker pm_ConstructSceneRootComponents = new MeasurementMarker( performanceMeasurements, "GLTF.ConstructSceneRootComponents");
+				
 		public enum ColliderType
 		{
 			None,
@@ -376,6 +474,7 @@ namespace UnityGLTF
 		/// <returns></returns>
 		public async Task LoadSceneAsync(int sceneIndex = -1, bool showSceneObj = true, Action<GameObject, ExceptionDispatchInfo> onLoadComplete = null, CancellationToken cancellationToken = default(CancellationToken), IProgress<ImportProgress> progress = null)
 		{
+			performanceMeasurements.Reset();
 			try
 			{
 				lock (this)
@@ -470,6 +569,7 @@ namespace UnityGLTF
 			if (progressStatus.TextureLoaded > progressStatus.TextureTotal) Debug.Log(LogType.Error, $"Textures loaded ({progressStatus.TextureLoaded}) is larger than texture total in the scene ({progressStatus.TextureTotal})");
 
 			onLoadComplete?.Invoke(LastLoadedScene, null);
+			performanceMeasurements.OutputTimes();
 		}
 
 		private async Task LoadUnreferencedAssetsAsync()
@@ -653,8 +753,12 @@ namespace UnityGLTF
 
 			GetGltfContentTotals(scene);
 
-			if (IsMultithreaded)
+		//	if (IsMultithreaded)
+			{
+				pm_PreparePrimitiveAttributes.Begin();
 				await PreparePrimitiveAttributes();
+				pm_PreparePrimitiveAttributes.End();
+			}
 			
 			await ConstructScene(scene, showSceneObj, cancellationToken);
 
@@ -739,6 +843,7 @@ namespace UnityGLTF
 
 		private async Task<GameObject> GetNode(int nodeId, CancellationToken cancellationToken)
 		{
+			pm_GetNodePur.Begin();
 			try
 			{
 				if (_assetCache.NodeCache[nodeId] == null)
@@ -752,8 +857,9 @@ namespace UnityGLTF
 
 					cancellationToken.ThrowIfCancellationRequested();
 					await ConstructBufferData(node, cancellationToken);
-
+					pm_GetNodePur.End();
 					await ConstructNode(node, nodeId, cancellationToken);
+					pm_GetNodePur.Begin();
 
 					try
 					{
@@ -778,16 +884,20 @@ namespace UnityGLTF
 							for (int i = 0; i < lodsExtension.NodeIds.Count; i++)
 							{
 								int lodNodeId = lodsExtension.NodeIds[i];
+								pm_GetNodePur.End();
 								await GetNode(lodNodeId, cancellationToken);
+								pm_GetNodePur.Begin();
 							}
 						}
 					}
 				}
 
+				pm_GetNodePur.End();
 				return _assetCache.NodeCache[nodeId];
 			}
 			catch (Exception ex)
 			{
+				pm_GetNodePur.End();
 				// If some failure occured during loading, remove the node
 
 				if (_assetCache.NodeCache[nodeId] != null)
@@ -810,13 +920,14 @@ namespace UnityGLTF
 
 		protected virtual async Task ConstructNode(Node node, int nodeIndex, CancellationToken cancellationToken)
 		{
+			pm_ConstructNodePur.Begin();
 			cancellationToken.ThrowIfCancellationRequested();
 
 			if (_assetCache.NodeCache[nodeIndex] != null)
 			{
+				pm_ConstructNodePur.End();
 				return;
 			}
-
 			var nodeObj = new GameObject(string.IsNullOrEmpty(node.Name) ? ("GLTFNode" + nodeIndex) : node.Name);
 			// If we're creating a really large node, we need it to not be visible in partial stages. So we hide it while we create it
 			nodeObj.SetActive(false);
@@ -829,20 +940,25 @@ namespace UnityGLTF
 			nodeObj.transform.localRotation = rotation;
 			nodeObj.transform.localScale = scale;
 			_assetCache.NodeCache[nodeIndex] = nodeObj;
-
+			
 			if (node.Children != null)
 			{
+				pm_ConstructNodePur.End();
 				foreach (var child in node.Children)
 				{
 					GameObject childObj = await GetNode(child.Id, cancellationToken);
 					childObj.transform.SetParent(nodeObj.transform, false);
 				}
+				pm_ConstructNodePur.Begin();
 			}
-
 			if (node.Mesh != null)
 			{
 				var mesh = node.Mesh.Value;
+				pm_ConstructNodePur.End();
+				pm_ConstructMeshFromNode.Begin();
 				await ConstructMesh(mesh, node.Mesh.Id, cancellationToken);
+				pm_ConstructMeshFromNode.End();
+				pm_ConstructNodePur.Begin();
 				var unityMesh = _assetCache.MeshCache[node.Mesh.Id].LoadedMesh;
 				var materials = node.Mesh.Value.Primitives.Select(p =>
 					p.Material != null ?
@@ -918,6 +1034,8 @@ namespace UnityGLTF
 
 			progressStatus.NodeLoaded++;
 			progress?.Report(progressStatus);
+			pm_ConstructNodePur.End();
+
 		}
 
 		private async Task ConstructBufferData(Node node, CancellationToken cancellationToken)
@@ -946,7 +1064,7 @@ namespace UnityGLTF
 		{
 			if (_assetCache.BufferCache[bufferIndex] != null)
 				return;
-			
+			pm_ConstructBuffer.Begin();	
 #if HAVE_MESHOPT_DECOMPRESS
 			if (buffer.Extensions != null && buffer.Extensions.ContainsKey(EXT_meshopt_compression_Factory.EXTENSION_NAME))
 			{
@@ -959,6 +1077,7 @@ namespace UnityGLTF
 				};
 
 				_assetCache.BufferCache[bufferIndex] = bufferCacheDate;
+				pm_ConstructBuffer.End();	
 				return;
 			}
 #else
@@ -1004,6 +1123,7 @@ namespace UnityGLTF
 				progressStatus.BuffersLoaded++;
 				progress?.Report(progressStatus);
 			}
+			pm_ConstructBuffer.End();
 		}
 
 		protected virtual async Task ConstructScene(GLTFScene scene, bool showSceneObj, CancellationToken cancellationToken)
@@ -1021,6 +1141,7 @@ namespace UnityGLTF
 
 				if (scene.Nodes != null)
 				{
+					pm_ConstructAllNodes.Begin();
 					Transform[] nodeTransforms = new Transform[scene.Nodes.Count];
 					for (int i = 0; i < scene.Nodes.Count; ++i)
 					{
@@ -1029,7 +1150,9 @@ namespace UnityGLTF
 						nodeObj.transform.SetParent(sceneObj.transform, false);
 						nodeTransforms[i] = nodeObj.transform;
 					}
+					pm_ConstructAllNodes.End();
 				}
+				pm_ConstructSceneRootComponents.Begin();
 
 				if (_options.AnimationMethod != AnimationMethod.None)
 				{
@@ -1103,7 +1226,7 @@ namespace UnityGLTF
 					if (!sceneObj.GetComponent<Animator>())
 						sceneObj.AddComponent<Animator>();
 				}
-
+				pm_ConstructSceneRootComponents.End();
 				CreatedObject = sceneObj;
 				InitializeGltfTopLevelObject();
 			}
