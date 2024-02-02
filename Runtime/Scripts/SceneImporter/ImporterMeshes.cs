@@ -88,32 +88,10 @@ namespace UnityGLTF
 			var firstPrim = mesh.Primitives.Count > 0 ?  mesh.Primitives[0] : null;
 			cancellationToken.ThrowIfCancellationRequested();
 
-			Dictionary<int, AccessorId> accessorIds = new Dictionary<int, AccessorId>();
-			uint vOffset = 0;
-			int primIndex = 0;
-			uint[] vertOffsetBySubMesh = new uint[mesh.Primitives.Count];
-			uint totalVertCount = 0;
-			uint lastVertOffset = 0;
-			foreach (var p in mesh.Primitives)
-			{
-				
-				var acc = p.Attributes[SemanticProperties.POSITION];
-				if (!accessorIds.ContainsKey(acc.Id))
-				{
-					accessorIds.Add(acc.Id, acc);
-					totalVertCount += acc.Value.Count;
-					vOffset = lastVertOffset;
-					lastVertOffset += acc.Value.Count;
-				}
-				vertOffsetBySubMesh[primIndex] = vOffset;
 
-				primIndex++;
-			}
-			
 			var meshCache = _assetCache.MeshCache[meshIndex];
 
-			var unityData = CreateUnityMeshData(mesh, firstPrim, totalVertCount);
-			unityData.subMeshVertexOffset = vertOffsetBySubMesh;
+			var unityData = CreateUnityMeshData(mesh, meshIndex, firstPrim);
 			
 			for (int i = 0; i < mesh.Primitives.Count; ++i)
 			{
@@ -121,14 +99,7 @@ namespace UnityGLTF
 				var primCache = meshCache.Primitives[i];
 				unityData.Topology[i] = GetTopology(primitive.Mode);
 
-				if (IsMultithreaded)
-				{
-					await Task.Run(() => ConvertAttributeAccessorsToUnityTypes(primCache, unityData, unityData.subMeshVertexOffset[i], i));
-				}
-				else
-				{
-					ConvertAttributeAccessorsToUnityTypes(primCache, unityData, unityData.subMeshVertexOffset[i], i);
-				}
+				ConvertAttributeAccessorsToUnityTypes(primCache, unityData, unityData.subMeshVertexOffset[i], i);
 
 				await CreateMaterials(primitive);
 
@@ -145,6 +116,54 @@ namespace UnityGLTF
 			pm_ConstructMesh.End();
 		}
 
+		private static uint[] CalculateSubMeshVertexOffset(GLTFMesh mesh, out uint totalVertCount)
+		{
+			Dictionary<int, AccessorId> accessorIds = new Dictionary<int, AccessorId>();
+			uint vOffset = 0;
+			int primIndex = 0;
+			uint[] vertOffsetBySubMesh = new uint[mesh.Primitives.Count];
+			totalVertCount = 0;
+			uint lastVertOffset = 0;
+			foreach (var p in mesh.Primitives)
+			{
+				var acc = p.Attributes[SemanticProperties.POSITION];
+				if (!accessorIds.ContainsKey(acc.Id))
+				{
+					accessorIds.Add(acc.Id, acc);
+					totalVertCount += acc.Value.Count;
+					vOffset = lastVertOffset;
+					lastVertOffset += acc.Value.Count;
+				}
+
+				vertOffsetBySubMesh[primIndex] = vOffset;
+
+				primIndex++;
+			}
+
+			return vertOffsetBySubMesh;
+		}
+
+		protected void PrepareUnityMeshData()
+		{
+			for (int i = 0; i < _gltfRoot.Meshes.Count(); i++)
+			{
+				int meshIndex = i;
+				var mesh = _gltfRoot.Meshes[meshIndex];
+				var meshCache = _assetCache.MeshCache[meshIndex];
+				var unityData = CreateUnityMeshData(mesh, meshIndex,
+					mesh.Primitives.Count > 0 ? mesh.Primitives[0] : null);
+				for (int primIndex = 0; primIndex < mesh.Primitives.Count; ++primIndex)
+				{
+					var primitive = mesh.Primitives[primIndex];
+					var primCache = meshCache.Primitives[primIndex];
+					unityData.Topology[primIndex] = GetTopology(primitive.Mode);
+
+					ConvertAttributeAccessorsToUnityTypes(primCache, unityData,
+						unityData.subMeshVertexOffset[primIndex], primIndex);
+				}
+			}
+		}
+		
 #if HAVE_DRACO
 		protected virtual async Task PrepareDracoMesh(GLTFMesh mesh, int meshIndex)
 		{
@@ -443,10 +462,8 @@ namespace UnityGLTF
 
 			await YieldOnTimeoutAndThrowOnLowMemory();
 
-			verticesLength = (uint) mesh.vertexCount;
-
 			var firstPrim = gltfMesh.Primitives[0];
-			var unityMeshData = CreateUnityMeshData(gltfMesh, firstPrim, verticesLength,true);
+			var unityMeshData = CreateUnityMeshData(gltfMesh, meshIndex, firstPrim, true);
 
 			uint vertOffset = 0;
 			var meshCache = _assetCache.MeshCache[meshIndex];
@@ -486,9 +503,15 @@ namespace UnityGLTF
 
 #endif
 
-		private static UnityMeshData CreateUnityMeshData(GLTFMesh gltfMesh, MeshPrimitive firstPrim, uint verticesLength, bool onlyMorphTargets = false)
+		private UnityMeshData CreateUnityMeshData(GLTFMesh gltfMesh, int meshIndex, MeshPrimitive firstPrim, bool onlyMorphTargets = false)
 		{
+			if (_assetCache.UnityMeshDataCache[meshIndex] != null)
+			{
+				return _assetCache.UnityMeshDataCache[meshIndex];
+			}
 			pm_CreateUnityMeshData.Begin();
+			var vertOffsetBySubMesh = CalculateSubMeshVertexOffset(gltfMesh, out var verticesLength);
+			
 			UnityMeshData unityMeshData = new UnityMeshData()
 			{
 				MorphTargetVertices = firstPrim.Targets != null && firstPrim.Targets[0].ContainsKey(SemanticProperties.POSITION)
@@ -503,8 +526,10 @@ namespace UnityGLTF
 
 				Topology = new MeshTopology[gltfMesh.Primitives.Count],
 				Indices = new int[gltfMesh.Primitives.Count][],
-				subMeshVertexOffset = new uint[gltfMesh.Primitives.Count]
+				subMeshVertexOffset = vertOffsetBySubMesh
 			};
+			_assetCache.UnityMeshDataCache[meshIndex] = unityMeshData;
+
 			if (!onlyMorphTargets)
 			{
 				unityMeshData.Vertices = new Vector3[verticesLength];
@@ -595,6 +620,10 @@ namespace UnityGLTF
 			}
 
 			_assetCache.MeshCache[meshIndex].LoadedMesh = mesh;
+			
+			// Free up some memory
+			unityMeshData.Clear();
+			
 			pm_ConstructUnityMesh.End();
 		}
 
@@ -678,7 +707,7 @@ namespace UnityGLTF
 			pm_ConstructMeshTargetsPrepareBuffers.End();
 		}
 
-		protected virtual async Task ConstructMeshTargetsBuild(MeshPrimitive primitive, int meshIndex, int primitiveIndex)
+		protected virtual void ConstructMeshTargets(MeshPrimitive primitive, int meshIndex, int primitiveIndex)
 		{
 			var newTargets = _assetCache.MeshCache[meshIndex].Primitives[primitiveIndex].Targets;
 			for (int i = 0; i < primitive.Targets.Count; i++)
@@ -804,11 +833,41 @@ namespace UnityGLTF
 			}
 		}
 
+		private void FreeUpAccessorContents()
+		{
+			for (int meshIndex = 0; meshIndex < _gltfRoot.Meshes.Count; meshIndex++)
+			{
+				var gltfMesh = _gltfRoot.Meshes[meshIndex];
+				for (int primIndex = 0; primIndex < gltfMesh.Primitives.Count; primIndex++)
+				{
+					var primCache = _assetCache.MeshCache[meshIndex].Primitives[primIndex];
+					if (primCache.meshAttributesCreated)
+					{
+						foreach (var att in primCache.Attributes)
+						{
+							att.Value.AccessorContent = new NumericArray();
+						}
+
+						foreach (var t in primCache.SparseAccessors)
+						{
+							t.Value.sparseValues.AccessorContent = new NumericArray();
+							t.Value.sparseIndices.AccessorContent = new NumericArray();
+						}
+						
+						foreach (var t in primCache.Targets)
+						{
+							foreach (var att in t)
+							{
+								att.Value.AccessorContent = new NumericArray();
+							}
+						}
+					}
+				}
+			}
+		}
+
 		private async Task PreparePrimitiveAttributes()
 		{
-			
-			List<Task> tasks = new List<Task>();
-			
 			for (int meshIndex = 0; meshIndex < _gltfRoot.Meshes.Count; meshIndex++)
 			{
 				if (_assetCache.MeshCache[meshIndex] == null)
@@ -875,33 +934,33 @@ namespace UnityGLTF
 					}
 				}
 				pm_DracoDecoding_MT.End();
-
 			}
 #endif
-			for (int meshIndex = 0; meshIndex < _gltfRoot.Meshes.Count; meshIndex++)
+			void BuildMeshesAttributes()
 			{
-				var gltfMesh = _gltfRoot.Meshes[meshIndex];
-				for (int i = 0; i < gltfMesh.Primitives.Count; i++)
+				for (int meshIndex = 0; meshIndex < _gltfRoot.Meshes.Count; meshIndex++)
 				{
-					var primCache = _assetCache.MeshCache[meshIndex].Primitives[i];
-					int primIndex = i;
-					int mIndex = meshIndex;
-					tasks.Add( Task.Run( () =>
+					var gltfMesh = _gltfRoot.Meshes[meshIndex];
+					for (int primIndex = 0; primIndex < gltfMesh.Primitives.Count; primIndex++)
 					{
+						var primCache = _assetCache.MeshCache[meshIndex].Primitives[primIndex];
 						if (!primCache.meshAttributesCreated)
 						{
 							primCache.meshAttributesCreated = true;
 							GLTFHelpers.BuildMeshAttributes(ref primCache.Attributes,ref primCache.SparseAccessors);
+							if (gltfMesh.Primitives[primIndex].Targets != null)
+								ConstructMeshTargets(gltfMesh.Primitives[primIndex], meshIndex, primIndex);
 						}
 						
-						if (gltfMesh.Primitives[primIndex].Targets != null)
-							ConstructMeshTargetsBuild(gltfMesh.Primitives[primIndex], mIndex, primIndex);
-					}));
+					}
+					
 				}
-				
 			}
 			
-			await Task.WhenAll(tasks);
+			if (IsMultithreaded)
+				await Task.Run(BuildMeshesAttributes);
+			else
+				BuildMeshesAttributes();
 		}
 
 		private async Task ConstructMeshAttributes(GLTFMesh mesh, MeshId meshId)
@@ -924,6 +983,13 @@ namespace UnityGLTF
 					pm_BuildMeshAttributes.Begin();
 					GLTFHelpers.BuildMeshAttributes(ref primCache.Attributes, ref primCache.SparseAccessors);
 					pm_BuildMeshAttributes.End();
+					
+					if (primitive.Targets != null)
+					{
+						// read mesh primitive targets into assetcache
+						await ConstructMeshTargetsPrepareBuffers(primitive, meshIndex, i);
+						ConstructMeshTargets(primitive, meshIndex, i);
+					}
 				}
 				
 				if (primitive.Material != null)
@@ -931,16 +997,8 @@ namespace UnityGLTF
 					pm_ConstructMaterialImageBuffers.Begin();
 					await ConstructMaterialImageBuffers(primitive.Material.Value);
 					pm_ConstructMaterialImageBuffers.End();
-
 				}
 	
-				if (primitive.Targets != null)
-				{
-					// read mesh primitive targets into assetcache
-					await ConstructMeshTargetsPrepareBuffers(primitive, meshIndex, i);
-					await ConstructMeshTargetsBuild(primitive, meshIndex, i);
-					
-				}
 			}
 			pm_ConstructMeshAttributes.End();
 		}
@@ -1024,6 +1082,9 @@ namespace UnityGLTF
 			uint vertOffset,
 			int indexOffset)
 		{
+			if (unityData.Created)
+				return;
+			unityData.Created = true;
 			pm_ConvertAttributesToUnityTypes.Begin();
 			var meshAttributes = primData.Attributes;
 			uint vertexCount = 0;

@@ -71,6 +71,7 @@ namespace UnityGLTF
 
 	public class UnityMeshData
 	{
+		public bool Created = false;
 		public Vector3[] Vertices;
 		public Vector3[] Normals;
 		public Vector4[] Tangents;
@@ -90,6 +91,25 @@ namespace UnityGLTF
 		
 		public HashSet<int> alreadyAddedAccessors = new HashSet<int>();
 		public uint[] subMeshVertexOffset;
+		
+		public void Clear()
+		{
+			Vertices = null;
+			Normals = null;
+			Tangents = null;
+			Uv1 = null;
+			Uv2 = null;
+			Uv3 = null;
+			Uv4 = null;
+			Colors = null;
+			BoneWeights = null;
+			MorphTargetVertices = null;
+			MorphTargetNormals = null;
+			MorphTargetTangents = null;
+			Topology = null;
+			Indices = null;
+			subMeshVertexOffset = null;
+		}
 	}
 
 	public struct ImportProgress
@@ -753,12 +773,16 @@ namespace UnityGLTF
 
 			GetGltfContentTotals(scene);
 
-		//	if (IsMultithreaded)
-			{
-				pm_PreparePrimitiveAttributes.Begin();
-				await PreparePrimitiveAttributes();
-				pm_PreparePrimitiveAttributes.End();
-			}
+			pm_PreparePrimitiveAttributes.Begin();
+			await PreparePrimitiveAttributes();
+			pm_PreparePrimitiveAttributes.End();
+			if (IsMultithreaded)
+				await Task.Run(PrepareUnityMeshData, cancellationToken);
+			else
+				PrepareUnityMeshData();
+
+			// Free up some Memory, Accessor contents are no longer needed
+			FreeUpAccessorContents();
 			
 			await ConstructScene(scene, showSceneObj, cancellationToken);
 
