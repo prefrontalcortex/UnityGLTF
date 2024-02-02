@@ -229,10 +229,12 @@ namespace UnityGLTF
 	public partial class GLTFSceneImporter : IDisposable
 	{
 		private static MeasurementGroup performanceMeasurements = new MeasurementGroup("GLTFSceneImporter");
+		private static MeasurementMarker pm_ParseJSON = new MeasurementMarker( performanceMeasurements, "GLTF.ParseJSON");
 		private static MeasurementMarker pm_PreparePrimitiveAttributes = new MeasurementMarker( performanceMeasurements, "GLTF.PreparePrimitiveAttributes");
+		private static MeasurementMarker pm_PrepareUnityMeshData = new MeasurementMarker( performanceMeasurements, "GLTF.PrepareUnityMeshData");
 		private static MeasurementMarker pm_ConstructMeshTargetsPrepareBuffers = new MeasurementMarker( performanceMeasurements, "GLTF.ConstructMeshTargetsPrepareBuffers");
 		private static MeasurementMarker pm_ConstructMeshAttributes = new MeasurementMarker( performanceMeasurements, "GLTF.ConstructMeshAttributes");
-		private static MeasurementMarker pm_ConstructPrimitiveAttributes = new MeasurementMarker( performanceMeasurements, "GLTF.ConstructMeshAttributes");
+		private static MeasurementMarker pm_ConstructPrimitiveAttributes = new MeasurementMarker( performanceMeasurements, "GLTF.pm_ConstructPrimitiveAttributes");
 		private static MeasurementMarker pm_ConvertAttributesToUnityTypes = new MeasurementMarker( performanceMeasurements, "GLTF.ConvertAttributeAccessorsToUnityTypes");
 		private static MeasurementMarker pm_BuildMeshAttributes = new MeasurementMarker( performanceMeasurements, "GLTF.BuildMeshAttributes");
 		private static MeasurementMarker pm_DracoDecoding_MT = new MeasurementMarker( performanceMeasurements, "GLTF.pm_DracoDecoding");
@@ -683,6 +685,7 @@ namespace UnityGLTF
 
 		private async Task LoadJson(string jsonFilePath)
 		{
+			pm_ParseJSON.Begin();
 #if !WINDOWS_UWP && !UNITY_WEBGL
 			var dataLoader2 = _options.DataLoader as IDataLoader2;
 			if (IsMultithreaded && dataLoader2 != null)
@@ -717,7 +720,7 @@ namespace UnityGLTF
 			{
 				GLTFParser.ParseJson(_gltfStream.Stream, out _gltfRoot, _gltfStream.StartPosition);
 			}
-
+			pm_ParseJSON.End();
 		}
 
 		/// <summary>
@@ -776,10 +779,15 @@ namespace UnityGLTF
 			pm_PreparePrimitiveAttributes.Begin();
 			await PreparePrimitiveAttributes();
 			pm_PreparePrimitiveAttributes.End();
+
+			pm_PrepareUnityMeshData.Begin();
+			
 			if (IsMultithreaded)
 				await Task.Run(PrepareUnityMeshData, cancellationToken);
 			else
 				PrepareUnityMeshData();
+		
+			pm_PrepareUnityMeshData.End();
 
 			// Free up some Memory, Accessor contents are no longer needed
 			FreeUpAccessorContents();
