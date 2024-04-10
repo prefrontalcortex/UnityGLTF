@@ -353,7 +353,6 @@ namespace UnityGLTF.Timeline
 
 		public void EndRecording(string filename, string sceneName = "scene", GLTFSettings settings = null)
 		{
-			if (!isRecording) return;
 			if (!hasRecording) return;
 
 			var dir = Path.GetDirectoryName(filename);
