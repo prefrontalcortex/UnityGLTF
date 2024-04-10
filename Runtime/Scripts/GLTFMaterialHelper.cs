@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 using UnityEditorInternal;
+using UnityEditor.ShaderGraph;
 #endif
 
 namespace UnityGLTF
@@ -24,6 +25,15 @@ namespace UnityGLTF
 		public static void RegisterMaterialConversionToGLTF(ConvertMaterialToGLTFDelegate converter) => ConvertMaterialDelegates += converter;
 		public static void UnregisterMaterialConversionToGLTF(ConvertMaterialToGLTFDelegate converter) => ConvertMaterialDelegates -= converter;
 
+#if UNITY_EDITOR
+		[InitializeOnLoadMethod]
+		private static void RegisterToPBRGraph()
+		{
+			PBRGraphGUI.ConvertMaterial += ConvertMaterialToGLTF;
+			PBRGraphGUI.ValidateMaterialKeywords += ValidateMaterialKeywords;
+		}
+#endif
+		
 		public static void ConvertMaterialToGLTF(Material material, Shader oldShader, Shader newShader)
 		{
 			if (ConvertMaterialDelegates != null)
@@ -127,8 +137,10 @@ namespace UnityGLTF
 				}
 			}
 
+#if UNITY_EDITOR
 			if (material.HasProperty("emissiveFactor"))
 				material.globalIlluminationFlags = MaterialEditor.FixupEmissiveFlag(material.GetColor("emissiveFactor"), material.globalIlluminationFlags);
+#endif
 		}
 
 		public static void SetKeyword(Material material, string keyword, bool state)
@@ -224,7 +236,10 @@ namespace UnityGLTF
 		}
 
 		private const string ShaderConversionScriptTemplate =
-@"using UnityEditor;
+@"
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 using UnityEngine;
 using UnityGLTF;
 
@@ -232,7 +247,10 @@ class Convert_<OldShader>_to_GLTF
 {
 	const string shaderName = ""<OldShaderName>"";
 
+#if UNITY_EDITOR
 	[InitializeOnLoadMethod]
+#endif
+	[RuntimeInitializeOnLoadMethod]
 	private static void Register()
 	{
 		GLTFMaterialHelper.RegisterMaterialConversionToGLTF(ConvertMaterialProperties);
@@ -256,7 +274,7 @@ class Convert_<OldShader>_to_GLTF
 		// Example:
 		// if (material.GetFloat(""_VERTEX_COLORS"") > 0.5f) material.EnableKeyword(""_VERTEX_COLORS_ON"");
 
-		ShaderGraphHelpers.ValidateMaterialKeywords(material);
+		GLTFMaterialHelper.ValidateMaterialKeywords(material);
 		return true;
 	}
 }

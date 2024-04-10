@@ -82,7 +82,25 @@ namespace UnityGLTF
 			{
 				material.Name = materialObj.name;
 			}
+			
+			
+			// TODO: There should be a GLTFMaterialHelper.HasConversion or something like this to prevent unnecessary material creation
+			Material convertedMaterial = new Material(materialObj);
+			GLTFMaterialHelper.ConvertMaterialToGLTF(convertedMaterial, materialObj.shader, Shader.Find("UnityGLTF/PBRGraph"));
+			if (convertedMaterial.shader != materialObj.shader)
+			{
+				materialObj = convertedMaterial;
+			}
 
+			void DestroyConvertedMaterial()
+			{
+#if UNITY_EDITOR
+				Material.DestroyImmediate(convertedMaterial);
+#else
+				Material.Destroy(convertedMaterial);
+#endif
+			}
+			
 			foreach (var plugin in _plugins)
 			{
 				if (plugin == null) continue;
@@ -90,6 +108,8 @@ namespace UnityGLTF
 				if (plugin.BeforeMaterialExport(this, _root, materialObj, material))
 				{
 					beforeMaterialExportMarker.End();
+
+					DestroyConvertedMaterial();
 					return CreateAndAddMaterialId(materialObj, material);
 				}
 				else
@@ -337,6 +357,7 @@ namespace UnityGLTF
 				}
 			}
 			exportMaterialMarker.End();
+			DestroyConvertedMaterial();
 
 			return CreateAndAddMaterialId(materialObj, material);
 		}

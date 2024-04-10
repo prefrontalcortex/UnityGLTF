@@ -29,7 +29,7 @@ namespace UnityGLTF
 		public override void ValidateMaterial(Material material)
 		{
 			base.ValidateMaterial(material);
-			GLTFMaterialHelper.ValidateMaterialKeywords(material);
+			ValidateMaterialKeywords?.Invoke(material);
 		}
 #endif
 
@@ -44,6 +44,12 @@ namespace UnityGLTF
 
 		private bool immutableMaterialCanBeModified = false;
 
+		public delegate void ConvertMaterialToGLTFDelegate(Material material, Shader oldShader, Shader newShader);
+		public delegate void ValidateMaterialKeywordsDelegate(Material material);
+		public static event ConvertMaterialToGLTFDelegate ConvertMaterial;
+		public static event ValidateMaterialKeywordsDelegate ValidateMaterialKeywords;
+
+		
 		public override void OnGUI(MaterialEditor materialEditor, MaterialProperty[] properties)
 		{
 			this.materialEditor = materialEditor;
@@ -112,7 +118,7 @@ namespace UnityGLTF
 						var newShaderGuid = isUnlit ? "59541e6caf586ca4f96ccf48a4813a51" : "478ce3626be7a5f4ea58d6b13f05a2e4";
 						var newShader = AssetDatabase.LoadAssetAtPath<Shader>(AssetDatabase.GUIDToAssetPath(newShaderGuid));
 						Undo.RegisterCompleteObjectUndo(targetMat, "Convert to UnityGltf shader");
-						GLTFMaterialHelper.ConvertMaterialToGLTF(targetMat, targetMat.shader, newShader);
+						ConvertMaterial?.Invoke(targetMat, targetMat.shader, newShader);
 					});
 				}
 				else
@@ -443,7 +449,7 @@ namespace UnityGLTF
 				foreach (var t in materialEditor.targets)
 				{
 					if (t is Material material)
-						GLTFMaterialHelper.ValidateMaterialKeywords(material);
+						ValidateMaterialKeywords?.Invoke(material);
 				}
 
 				// We only need to do this for non-editable materials, so we can flush the changes back out to disk.
@@ -569,7 +575,7 @@ namespace UnityGLTF
 
 		public override void AssignNewShaderToMaterial(Material material, Shader oldShader, Shader newShader)
 		{
-			GLTFMaterialHelper.ConvertMaterialToGLTF(material, oldShader, newShader);
+			ConvertMaterial?.Invoke(material, oldShader, newShader);
 		}
 
 		public delegate void OnImmutableMaterialChanged(Material material);

@@ -11,7 +11,9 @@
         "Draco",
         "Unity.Meshopt.Decompress",
         "Unity.Collections",
-        "Unity.Mathematics"
+        "Unity.Mathematics",
+        "Unity.ShaderGraph.Editor",
+        "UnityEditor.UI"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
