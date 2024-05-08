@@ -12,6 +12,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using GLTF;
 using GLTF.Schema;
 using Unity.Profiling;
 using UnityEngine;
@@ -887,6 +888,55 @@ namespace UnityGLTF
 
 			gltfWriteOutMarker.End();
 			exportGltfMarker.End();
+		}
+
+		public static void SaveGltfAndBin(string path, string fileName, GLBObject glb)
+		{
+			var toLower = fileName.ToLowerInvariant();
+			if (toLower.EndsWith(".gltf"))
+				fileName = fileName.Substring(0, fileName.Length - 5);
+			if (toLower.EndsWith(".bin"))
+				fileName = fileName.Substring(0, fileName.Length - 4);
+			var fullPath = GetFileName(path, fileName, ".bin");
+			var dirName = Path.GetDirectoryName(fullPath);
+			if (dirName != null && !Directory.Exists(dirName))
+				Directory.CreateDirectory(dirName);
+
+			// sanitized file path can differ
+			fileName = Path.GetFileNameWithoutExtension(fullPath);
+			var binFile = File.Create(fullPath);
+			
+			var _root = glb.Root;
+			var buffers = new List<GLTFBuffer>(_root.Buffers);
+			_root.Buffers.Clear();
+			_root.Buffers.Add(new GLTFBuffer
+			{
+				Uri = fileName + ".bin",
+				ByteLength = glb.BinaryChunkInfo.Length
+			});
+			
+			var _bufferWriter = new BinaryWriterWithLessAllocations(binFile);
+			// copy from glb.Stream to _bufferWriter starting at the binary chunk start position
+			glb.Stream.Position = glb.BinaryChunkInfo.StartPosition;
+			while (glb.Stream.Position < glb.BinaryChunkInfo.StartPosition + glb.BinaryChunkInfo.Length)
+			{
+				var buffer = new byte[4096];
+				var read = glb.Stream.Read(buffer, 0, buffer.Length);
+				_bufferWriter.Write(buffer, 0, read);
+			}
+			
+			var gltfFile = File.CreateText(Path.ChangeExtension(fullPath, ".gltf"));
+			gltfSerializationMarker.Begin();
+			_root.Serialize(gltfFile);
+			
+			_bufferWriter.Close();
+#if WINDOWS_UWP
+			gltfFile.Dispose();
+			binFile.Dispose();
+#else
+			gltfFile.Close();
+			binFile.Close();
+#endif
 		}
 
 		/// <summary>
