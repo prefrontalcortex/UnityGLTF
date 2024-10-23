@@ -21,7 +21,6 @@ namespace UnityGLTF
 	{
 		public string GLTFUri = null;
 		public bool Multithreaded = true;
-		public bool UseStream = false;
 		public bool AppendStreamingAssets = true;
 		public bool PlayAnimationOnLoad = true;
 		[Tooltip("Hide the scene object during load, then activate it when complete")]
